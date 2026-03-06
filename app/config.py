@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     google_api_key: str = ""
     google_cse_id: str = ""
+    google_daily_quota: int = 100
 
 
 settings = Settings()

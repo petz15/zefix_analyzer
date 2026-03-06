@@ -21,6 +21,22 @@ class Company(Base):
     # Website found via Google Search
     website_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Top-5 Google results as JSON [{title, link, snippet, score}, ...] sorted by score desc
+    google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 0-100 auto match score for the current website_url; None = not yet scored
+    website_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Manual workflow statuses
+    # 'pending' | 'confirmed' | 'interesting' | 'rejected'
+    review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # 'not_sent' | 'sent' | 'responded' | 'converted' | 'rejected'
+    proposal_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Contact info (manually entered)
+    contact_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Comma-separated free-form labels, e.g. "saas,b2b,warm-lead"
+    tags: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 

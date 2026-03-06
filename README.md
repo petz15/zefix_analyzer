@@ -1,12 +1,14 @@
 # Zefix Analyzer
 
-Internal open-source tool for analysing Swiss registered companies.
+Internal leads dashboard for Swiss registered companies. Bulk-imports the entire Zefix commercial register, runs Google Search to find each company's website, and provides a GUI to review, score, and track outreach.
 
-* **Zefix API** – search and import companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html))
-* **Google Custom Search** – automatically find a company's website
-* **Notes** – attach free-text notes to any company for manual research
-* **PostgreSQL** – all data is persisted in a Postgres database
-* **FastAPI** – interactive REST API with auto-generated docs at `/docs`
+* **Zefix API** – bulk-import all ~700k companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html)), canton by canton with resume support
+* **Google Custom Search** – automatically find and score each company's website (0–100 match score)
+* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status
+* **Company detail** – view enriched data, pick best website from search results, add contact info and notes
+* **CSV export** – export any filtered view to CSV
+* **PostgreSQL** – all data persisted in Postgres; DB indexes on all filter columns
+* **FastAPI + Jinja2** – server-rendered UI, no JS framework required
 
 ---
 
@@ -14,13 +16,13 @@ Internal open-source tool for analysing Swiss registered companies.
 
 ```bash
 cp .env.example .env
-# Edit .env and set GOOGLE_API_KEY and GOOGLE_CSE_ID if needed
+# Edit .env: set GOOGLE_API_KEY and GOOGLE_CSE_ID
 
 docker compose up --build
 ```
 
-The API will be available at <http://localhost:8000>.  
-Interactive docs: <http://localhost:8000/docs>
+GUI: <http://localhost:8000/ui>
+Health check: <http://localhost:8000/health>
 
 ---
 
@@ -35,20 +37,10 @@ Interactive docs: <http://localhost:8000/docs>
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in your values
-```
-
-### Run database migrations
-
-```bash
+cp .env.example .env         # fill in your values
 alembic upgrade head
-```
-
-### Start the server
-
-```bash
 uvicorn app.main:app --reload
 ```
 
@@ -69,24 +61,162 @@ All settings are read from environment variables (or a `.env` file):
 
 ---
 
-## API Overview
+## GUI Workflow
 
-| Method | Path | Description |
+1. **Bulk import** all companies from Zefix (see below) — one-time, ~hours
+2. **Batch enrich** with Google Search to find websites — runs daily against free 100-query quota
+3. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, score; sort; paginate; bulk-update
+4. **Company detail** — pick best website from Google results, set contact info, add research notes
+5. **Export CSV** — download any filtered view
+
+### Status fields
+
+| Field | Values |
+|---|---|
+| Review status | `pending` (default) · `confirmed` · `interesting` · `rejected` |
+| Proposal status | `not sent` (default) · `sent` · `responded` · `converted` · `rejected` |
+| Website match score | 0–100 (auto-scored: name overlap, location, purpose keywords, legal form) |
+
+---
+
+## Data Collection (run_collector.py)
+
+Three modes — run locally or via Docker:
+
+```bash
+python -m app.run_collector <mode> [flags]
+# or via Docker:
+docker compose --profile collector run --rm collector python -m app.run_collector <mode> [flags]
+```
+
+### `bulk` — mass-import all companies from Zefix
+
+Iterates every canton with pagination. No Google Search — fast, low API load. Run once to seed the DB.
+
+```bash
+python -m app.run_collector bulk
+python -m app.run_collector bulk --canton ZH --canton BE   # specific cantons only
+python -m app.run_collector bulk --resume                  # resume after interruption
+```
+
+Flags:
+* `--canton XX` — limit to specific canton(s), repeatable (default: all 26)
+* `--page-size 200` — companies per API request (Zefix max ~500)
+* `--delay 0.5` — seconds between API calls
+* `--include-inactive` — include inactive register entries
+* `--resume` — continue from last checkpoint (survives crashes/network errors)
+
+### `batch` — recurring Google Search enrichment
+
+Processes companies already in the DB, runs Google Search to find websites.
+Respects the 100 free queries/day limit — the dashboard shows today's count.
+
+```bash
+python -m app.run_collector batch --limit 100
+python -m app.run_collector batch --limit 100 --refresh-zefix   # also re-fetch Zefix details
+```
+
+Flags:
+* `--limit 100` — max companies to process (default: 100)
+* `--skip 200` — record offset, for manual pagination of large runs
+* `--all-companies` — process all companies, not only those missing a website
+* `--refresh-zefix` — re-fetch full Zefix details (purpose, address) before Google step
+* `--skip-google` — skip Google Search (useful with `--refresh-zefix` for data refresh only)
+
+### `initial` — one-time import from UIDs or name searches
+
+Useful for targeted imports before or instead of a full bulk run.
+
+```bash
+python -m app.run_collector initial --name "Muster AG" --uid CHE-123.456.789
+python -m app.run_collector initial --names-file names.txt --uids-file uids.txt
+```
+
+Flags:
+* `--name` / `--names-file` — search terms (repeatable / one per line)
+* `--uid` / `--uids-file` — direct Zefix UIDs (repeatable / one per line)
+* `--import-limit-per-name 10` — how many results to import per search term
+* `--search-max-results 25` — Zefix search breadth
+* `--include-inactive` — include inactive companies
+* `--skip-google` — import from Zefix only
+
+### Scheduling recurring batch runs (cron)
+
+```bash
+# Every day at 02:30 — process up to 100 companies
+30 2 * * * cd /opt/zefix_analyzer && docker compose --profile collector run --rm collector \
+  python -m app.run_collector batch --limit 100 >> /var/log/zefix_batch.log 2>&1
+```
+
+---
+
+## Zefix API reference
+
+The app uses the public Zefix REST API — no account required for read-only access.
+Full Swagger docs: https://www.zefix.admin.ch/ZefixREST/swagger-ui.html
+
+Base URL: `https://www.zefix.admin.ch/ZefixREST/api/v1`
+
+### Endpoints used
+
+#### `POST /company/search` — search / paginate companies
+
+Used by both `bulk` (canton sweep) and `initial` (name search) modes.
+
+```json
+{
+  "canton": "ZH",
+  "maxEntries": 200,
+  "offset": 0,
+  "activeOnly": true,
+  "languageKey": "en"
+}
+```
+
+Key request fields:
+
+| Field | Type | Description |
 |---|---|---|
-| `GET` | `/api/v1/companies/zefix/search?name=…` | Search Zefix (no DB write) |
-| `GET` | `/api/v1/companies/zefix/{uid}` | Full Zefix company detail |
-| `POST` | `/api/v1/companies/zefix/import/{uid}` | Import/update company from Zefix |
-| `GET` | `/api/v1/companies` | List companies in DB |
-| `POST` | `/api/v1/companies` | Create company manually |
-| `GET` | `/api/v1/companies/{id}` | Get company by ID |
-| `PATCH` | `/api/v1/companies/{id}` | Update company |
-| `DELETE` | `/api/v1/companies/{id}` | Delete company |
-| `GET` | `/api/v1/companies/{id}/google-search` | Search Google & save website |
-| `GET` | `/api/v1/companies/{id}/notes` | List notes |
-| `POST` | `/api/v1/companies/{id}/notes` | Add a note |
-| `GET` | `/api/v1/companies/{id}/notes/{nid}` | Get note |
-| `PATCH` | `/api/v1/companies/{id}/notes/{nid}` | Update note |
-| `DELETE` | `/api/v1/companies/{id}/notes/{nid}` | Delete note |
+| `name` | string | Company name search term (partial match) |
+| `canton` | string | Two-letter canton code (`ZH`, `BE`, …) — omit for all cantons |
+| `maxEntries` | int | Results per page, max ~500 |
+| `offset` | int | Zero-based record offset for pagination |
+| `activeOnly` | bool | Filter to active register entries only |
+| `languageKey` | string | Response language: `de`, `fr`, `it`, `en` |
+
+Response: `{ "list": [ ... ], "count": 12345 }` or a bare array depending on endpoint version.
+
+Each company object contains: `uid`, `name` (localised dict or string), `legalForm`, `status`, `municipality`, `canton`.
+
+#### `GET /company/uid/{uid}` — full company details
+
+Used by `initial` mode and `batch --refresh-zefix`. UID format: `CHE123456789` (digits only) or `CHE-123.456.789`.
+
+Returns the full company record including:
+
+| Field | Description |
+|---|---|
+| `uid` | UID in `CHE-XXX.XXX.XXX` format |
+| `name` | Localised name dict `{ "de": "...", "fr": "...", "it": "..." }` |
+| `legalForm` | `{ "de": "Aktiengesellschaft", "shortName": "AG" }` |
+| `status` | `ACTIVE`, `DELETED`, etc. |
+| `municipality` | Municipality name string |
+| `canton` | Two-letter canton code |
+| `address` | `{ "street", "houseNumber", "swissZipCode", "city" }` |
+| `purpose` | Business purpose text (used for website scoring) |
+| `registrationDate` | ISO date string |
+
+#### `GET /canton` — list all cantons
+
+Returns the list of valid canton codes. The app hardcodes all 26: `AG AI AR BE BL BS FR GE GL GR JU LU NE NW OW SG SH SO SZ TG TI UR VD VS ZG ZH`.
+
+### Authentication
+
+The API is publicly accessible without credentials for read access. If your deployment requires HTTP Basic Auth (e.g. a Zefix test environment), set `ZEFIX_API_USERNAME` and `ZEFIX_API_PASSWORD` in `.env`.
+
+### Rate limits
+
+Zefix does not publish official rate limits. The `--delay` flag (default `0.5s` between pages) is conservative enough to avoid any observed throttling during a full 26-canton sweep.
 
 ---
 
@@ -97,3 +227,48 @@ pytest
 ```
 
 Tests use an in-memory SQLite database — no PostgreSQL required.
+
+---
+
+## Database migrations
+
+```bash
+alembic upgrade head      # apply all migrations
+alembic current           # show current revision
+alembic history           # list all revisions
+```
+
+Migrations live in `alembic/versions/`. Current chain:
+
+| Revision | Description |
+|---|---|
+| `0001` | Initial schema (companies, notes) |
+| `0002` | Status fields (review, proposal, website score, Google results) |
+| `0003` | Filter indexes |
+| `0004` | Contact fields, industry, tags, collection_runs table |
+
+---
+
+## Roadmap
+
+### Near-term
+
+- [ ] **Preserve filters on "Back to list"** — pass referrer or session state so filters survive opening a company detail
+- [ ] **Inline status dropdowns in table** — change review/proposal status without opening the company page or using bulk actions
+- [ ] **Zefix detail enrichment pass** — dedicated `batch --enrich-zefix-only` mode to fill `purpose`/`address` for bulk-imported companies (improves scoring quality)
+- [ ] **"Not searched vs no result" distinction** — show a visual indicator in the table for companies that were searched but returned no Google results, vs never searched
+
+### Medium-term
+
+- [ ] **Background task queue** — move bulk import and batch enrichment to a task queue (Celery + Redis or FastAPI `BackgroundTasks`) so runs can be triggered and monitored from the UI rather than via CLI/SSH
+- [ ] **Scheduler UI** — configure and trigger batch runs from the dashboard; view run history and stats
+- [ ] **AI-assisted scoring** — use an LLM to read the company purpose and website snippet to produce a richer match score and auto-suggest industry classification
+- [ ] **Duplicate detection** — flag companies that appear to share a website, suggesting they are related entities
+
+### Multi-user / public hosting
+
+- [ ] **Authentication** — login system (session-based or OAuth) before any public exposure; per-user data isolation
+- [ ] **Role-based access** — read-only viewer role vs full editor role
+- [ ] **Per-user quota tracking** — replace the global Google quota counter with per-user accounting
+- [ ] **Rate limiting** — throttle Google Search triggers per user to prevent quota exhaustion from concurrent users
+- [ ] **Audit log** — record who changed review/proposal status and when

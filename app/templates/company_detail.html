@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{# ── Company header ──────────────────────────────────────────────────────── #}
+<section class="card">
+  <div class="stack-header">
+    <h2>{{ company.name }}</h2>
+    <a class="button-link secondary" href="/ui">Back to list</a>
+  </div>
+
+  {# Status badges row #}
+  <div class="status-row">
+    {% if company.website_checked_at %}
+      <span class="badge badge-blue">Google searched</span>
+    {% else %}
+      <span class="badge badge-gray">Not searched</span>
+    {% endif %}
+
+    {% if company.website_match_score is not none %}
+      {% set sc = company.website_match_score %}
+      <span class="badge {% if sc >= 70 %}badge-green{% elif sc >= 40 %}badge-yellow{% else %}badge-red{% endif %}">
+        Score {{ sc }}/100
+      </span>
+    {% endif %}
+
+    {% if company.review_status %}
+      <span class="badge
+        {% if company.review_status == 'confirmed' %}badge-green
+        {% elif company.review_status == 'interesting' %}badge-blue
+        {% elif company.review_status == 'rejected' %}badge-red
+        {% else %}badge-gray{% endif %}">
+        Review: {{ company.review_status }}
+      </span>
+    {% else %}
+      <span class="badge badge-gray">Review: pending</span>
+    {% endif %}
+
+    {% if company.proposal_status and company.proposal_status != 'not_sent' %}
+      <span class="badge
+        {% if company.proposal_status == 'converted' %}badge-green
+        {% elif company.proposal_status == 'responded' %}badge-blue
+        {% elif company.proposal_status == 'rejected' %}badge-red
+        {% else %}badge-yellow{% endif %}">
+        Proposal: {{ company.proposal_status }}
+      </span>
+    {% else %}
+      <span class="badge badge-gray">Proposal: not sent</span>
+    {% endif %}
+  </div>
+
+  <dl class="meta-grid">
+    <dt>UID</dt><dd>{{ company.uid }}</dd>
+    <dt>Legal form</dt><dd>{{ company.legal_form or "-" }}</dd>
+    <dt>Zefix status</dt><dd>{{ company.status or "-" }}</dd>
+    <dt>Municipality</dt><dd>{{ company.municipality or "-" }}</dd>
+    <dt>Canton</dt><dd>{{ company.canton or "-" }}</dd>
+    <dt>Address</dt><dd>{{ company.address or "-" }}</dd>
+    <dt>Purpose</dt><dd class="purpose-cell">{{ company.purpose or "-" }}</dd>
+    <dt>Website</dt>
+    <dd>
+      {% if company.website_url %}
+        <a href="{{ company.website_url }}" target="_blank" rel="noopener noreferrer">{{ company.website_url }}</a>
+      {% else %}
+        -
+      {% endif %}
+    </dd>
+    <dt>Industry</dt><dd>{{ company.industry or "-" }}</dd>
+    <dt>Tags</dt><dd>{{ company.tags or "-" }}</dd>
+    <dt>Contact</dt>
+    <dd>
+      {% if company.contact_name or company.contact_email or company.contact_phone %}
+        {{ company.contact_name or "" }}
+        {% if company.contact_email %}<br><a href="mailto:{{ company.contact_email }}">{{ company.contact_email }}</a>{% endif %}
+        {% if company.contact_phone %}<br>{{ company.contact_phone }}{% endif %}
+      {% else %}
+        -
+      {% endif %}
+    </dd>
+    <dt>Google searched</dt><dd>{{ company.website_checked_at.strftime('%Y-%m-%d %H:%M') if company.website_checked_at else "-" }}</dd>
+    <dt>Created</dt><dd>{{ company.created_at.strftime('%Y-%m-%d') }}</dd>
+    <dt>Updated</dt><dd>{{ company.updated_at.strftime('%Y-%m-%d') }}</dd>
+  </dl>
+</section>
+
+{# ── Edit company fields ──────────────────────────────────────────────────── #}
+<section class="card">
+  <details>
+    <summary class="section-toggle">Edit Company Fields</summary>
+    <form method="post" action="/ui/companies/{{ company.id }}/edit" class="edit-form">
+      <div class="form-grid">
+        <label class="form-label">
+          <span>Website URL</span>
+          <input type="url" name="website_url" value="{{ company.website_url or '' }}" placeholder="https://example.ch">
+        </label>
+        <label class="form-label">
+          <span>Review status</span>
+          <select name="review_status">
+            <option value="">— pending —</option>
+            {% for val in ['confirmed', 'interesting', 'rejected'] %}
+              <option value="{{ val }}" {% if company.review_status == val %}selected{% endif %}>{{ val }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="form-label">
+          <span>Proposal status</span>
+          <select name="proposal_status">
+            <option value="not_sent" {% if not company.proposal_status or company.proposal_status == 'not_sent' %}selected{% endif %}>not sent</option>
+            {% for val in ['sent', 'responded', 'converted', 'rejected'] %}
+              <option value="{{ val }}" {% if company.proposal_status == val %}selected{% endif %}>{{ val }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="form-label">
+          <span>Industry</span>
+          <input type="text" name="industry" value="{{ company.industry or '' }}" placeholder="e.g. IT, Bau, Handel…">
+        </label>
+        <label class="form-label">
+          <span>Tags</span>
+          <input type="text" name="tags" value="{{ company.tags or '' }}" placeholder="e.g. saas, warm-lead…">
+        </label>
+        <label class="form-label">
+          <span>Contact name</span>
+          <input type="text" name="contact_name" value="{{ company.contact_name or '' }}" placeholder="Full name">
+        </label>
+        <label class="form-label">
+          <span>Contact email</span>
+          <input type="text" name="contact_email" value="{{ company.contact_email or '' }}" placeholder="email@example.ch">
+        </label>
+        <label class="form-label">
+          <span>Contact phone</span>
+          <input type="text" name="contact_phone" value="{{ company.contact_phone or '' }}" placeholder="+41 …">
+        </label>
+      </div>
+      <button type="submit">Save changes</button>
+    </form>
+  </details>
+</section>
+
+{# ── Google Search ────────────────────────────────────────────────────────── #}
+<section class="card">
+  <div class="stack-header">
+    <h3>Google Search Results</h3>
+    <form method="post" action="/ui/companies/{{ company.id }}/google-search">
+      <button type="submit">{% if company.website_checked_at %}Re-run search{% else %}Run Google Search{% endif %}</button>
+    </form>
+  </div>
+
+  {% if google_results %}
+    <p class="muted-hint">Select the best matching website and click "Use selected".</p>
+    <form method="post" action="/ui/companies/{{ company.id }}/set-website">
+      <div class="results-list">
+        {% for r in google_results %}
+          <label class="result-card {% if company.website_url == r.link %}result-card--active{% endif %}">
+            <input type="radio" name="website_url" value="{{ r.link }}"
+              {% if loop.first and not company.website_url %}checked{% endif %}
+              {% if company.website_url == r.link %}checked{% endif %}>
+            <input type="hidden" name="website_match_score" value="{{ r.score }}">
+            <div class="result-body">
+              <div class="result-title">{{ r.title }}</div>
+              <a class="result-url" href="{{ r.link }}" target="_blank" rel="noopener noreferrer">{{ r.link }}</a>
+              {% if r.snippet %}<div class="result-snippet">{{ r.snippet }}</div>{% endif %}
+            </div>
+            <div class="score-pill {% if r.score >= 70 %}score-high{% elif r.score >= 40 %}score-mid{% else %}score-low{% endif %}">
+              {{ r.score }}
+            </div>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="mt-1">
+        <button type="submit">Use selected website</button>
+      </div>
+    </form>
+  {% elif company.website_checked_at %}
+    <p class="muted-hint">No results were returned for this company.</p>
+  {% else %}
+    <p class="muted-hint">No Google search run yet.</p>
+  {% endif %}
+</section>
+
+{# ── Notes ────────────────────────────────────────────────────────────────── #}
+<section class="card">
+  <h3>Notes</h3>
+  <form method="post" action="/ui/companies/{{ company.id }}/notes" class="stack-form">
+    <textarea name="content" rows="3" placeholder="Add a research note…" required></textarea>
+    <button type="submit">Add note</button>
+  </form>
+
+  <ul class="note-list">
+    {% for n in notes %}
+      <li>
+        <div class="note-head">
+          <small>{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+          <div class="note-actions">
+            <form method="post" action="/ui/companies/{{ company.id }}/notes/{{ n.id }}/delete"
+                  onsubmit="return confirm('Delete this note?')">
+              <button type="submit" class="danger small">Delete</button>
+            </form>
+          </div>
+        </div>
+        <p class="note-content">{{ n.content }}</p>
+        <details class="note-edit-toggle">
+          <summary class="note-edit-summary">Edit</summary>
+          <form method="post" action="/ui/companies/{{ company.id }}/notes/{{ n.id }}/edit" class="stack-form note-edit-form">
+            <textarea name="content" rows="3" required>{{ n.content }}</textarea>
+            <button type="submit">Save</button>
+          </form>
+        </details>
+      </li>
+    {% else %}
+      <li class="note-empty">No notes yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{# ── Raw Zefix payload ────────────────────────────────────────────────────── #}
+{% if zefix_pretty %}
+<section class="card">
+  <details>
+    <summary class="section-toggle">Raw Zefix Payload</summary>
+    <pre>{{ zefix_pretty }}</pre>
+  </details>
+</section>
+{% endif %}
+
+{% endblock %}

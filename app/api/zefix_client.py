@@ -1,12 +1,18 @@
 """Client for the Zefix REST API (https://www.zefix.admin.ch/ZefixREST/api/v1)."""
 
-import json
 from typing import Any
 
 import httpx
 
 from app.config import settings
 from app.schemas.company import ZefixSearchResult
+
+# All 26 Swiss cantons in the order the Zefix API recognises
+SWISS_CANTONS = [
+    "AG", "AI", "AR", "BE", "BL", "BS", "FR", "GE", "GL", "GR",
+    "JU", "LU", "NE", "NW", "OW", "SG", "SH", "SO", "SZ", "TG",
+    "TI", "UR", "VD", "VS", "ZG", "ZH",
+]
 
 
 def _get_auth() -> httpx.BasicAuth | None:
@@ -21,19 +27,7 @@ def search_companies(
     max_results: int = 20,
     active_only: bool = False,
 ) -> list[ZefixSearchResult]:
-    """Search for companies by name via the Zefix API.
-
-    Args:
-        name: Company name (or partial name) to search for.
-        max_results: Maximum number of results to return (server-side cap may apply).
-        active_only: If True, only return companies with an active entry.
-
-    Returns:
-        A list of :class:`ZefixSearchResult` instances.
-
-    Raises:
-        httpx.HTTPStatusError: If the Zefix API returns a non-2xx response.
-    """
+    """Search for companies by name via the Zefix API."""
     url = f"{settings.zefix_api_base_url}/company/search"
     payload: dict[str, Any] = {"name": name, "maxEntries": max_results, "languageKey": "en"}
     if active_only:
@@ -44,24 +38,49 @@ def search_companies(
         response.raise_for_status()
 
     data = response.json()
-    # The API returns a list of company objects directly
+    items = data if isinstance(data, list) else data.get("list", [])
+    return [_parse_company(item) for item in items]
+
+
+def fetch_companies_by_canton(
+    canton: str,
+    *,
+    page_size: int = 200,
+    offset: int = 0,
+    active_only: bool = True,
+) -> list[ZefixSearchResult]:
+    """Fetch one page of companies for a given canton.
+
+    Args:
+        canton: Two-letter canton code, e.g. ``"ZH"``.
+        page_size: Number of results per page (max accepted by the API: 500).
+        offset: Zero-based record offset for pagination.
+        active_only: When True only include companies with an active register entry.
+
+    Returns:
+        List of :class:`ZefixSearchResult`. An empty list signals end-of-pages.
+    """
+    url = f"{settings.zefix_api_base_url}/company/search"
+    payload: dict[str, Any] = {
+        "canton": canton,
+        "maxEntries": page_size,
+        "offset": offset,
+        "languageKey": "en",
+    }
+    if active_only:
+        payload["activeOnly"] = True
+
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(url, json=payload, auth=_get_auth())
+        response.raise_for_status()
+
+    data = response.json()
     items = data if isinstance(data, list) else data.get("list", [])
     return [_parse_company(item) for item in items]
 
 
 def get_company(uid: str) -> dict[str, Any]:
-    """Fetch full company details by UID from the Zefix API.
-
-    Args:
-        uid: The Swiss UID (e.g. ``CHE-123.456.789``).
-
-    Returns:
-        The raw response JSON as a dict.
-
-    Raises:
-        httpx.HTTPStatusError: If the Zefix API returns a non-2xx response.
-    """
-    # Normalise UID: the API expects no dashes for the path parameter
+    """Fetch full company details by UID from the Zefix API."""
     uid_clean = uid.replace("-", "").replace(".", "")
     url = f"{settings.zefix_api_base_url}/company/uid/{uid_clean}"
 
@@ -75,10 +94,8 @@ def get_company(uid: str) -> dict[str, Any]:
 def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     """Map a raw Zefix API company dict to a :class:`ZefixSearchResult`."""
     uid = data.get("uid", "") or ""
-    # Zefix returns UID as numeric string; normalise to ``CHE-XXX.XXX.XXX``
     uid = _normalise_uid(uid)
 
-    # Name may be a dict keyed by language
     name_raw = data.get("name", "")
     if isinstance(name_raw, dict):
         name = name_raw.get("de") or name_raw.get("fr") or name_raw.get("it") or next(iter(name_raw.values()), "")

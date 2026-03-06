@@ -9,20 +9,50 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zefix -d zefix_analyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://zefix:zefix@db:5432/zefix_analyzer
-      ZEFIX_API_BASE_URL: https://www.zefix.admin.ch/ZefixREST/api/v1
+      DATABASE_URL: ${DATABASE_URL:-postgresql://zefix:zefix@db:5432/zefix_analyzer}
+      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
+      ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
+      ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_CSE_ID: ${GOOGLE_CSE_ID:-}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    restart: unless-stopped
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  collector:
+    build: .
+    profiles: ["collector"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://zefix:zefix@db:5432/zefix_analyzer}
+      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
+      ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
+      ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_CSE_ID: ${GOOGLE_CSE_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Override with: docker compose --profile collector run --rm collector python -m app.run_collector bulk
+    command: >
+      sh -c "alembic upgrade head && python -m app.run_collector batch --limit 100"
 
 volumes:
   postgres_data:

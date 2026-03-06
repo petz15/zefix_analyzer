@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{# ── Stats bar ────────────────────────────────────────────────────────────── #}
+<section class="card stats-bar">
+  <div class="stat-item">
+    <span class="stat-value">{{ stats.total }}</span>
+    <span class="stat-label">Total companies</span>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <span class="stat-value">{{ stats.searched }}</span>
+    <span class="stat-label">Google searched</span>
+  </div>
+  <div class="stat-item stat-item--muted">
+    <span class="stat-value">{{ stats.total - stats.searched }}</span>
+    <span class="stat-label">Not yet searched</span>
+  </div>
+  <div class="stat-item {% if stats.searches_today >= (google_daily_quota * 0.9) | int %}stat-item--warn{% endif %}">
+    <span class="stat-value {% if stats.searches_today >= (google_daily_quota * 0.9) | int %}text-red{% elif stats.searches_today >= (google_daily_quota * 0.7) | int %}text-yellow{% endif %}">
+      {{ stats.searches_today }}/{{ google_daily_quota }}
+    </span>
+    <span class="stat-label">Searches today</span>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <span class="stat-value text-green">{{ stats.review.confirmed }}</span>
+    <span class="stat-label">Confirmed</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value text-blue">{{ stats.review.interesting }}</span>
+    <span class="stat-label">Interesting</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value text-muted">{{ stats.review.pending }}</span>
+    <span class="stat-label">Pending review</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value text-red">{{ stats.review.rejected }}</span>
+    <span class="stat-label">Rejected</span>
+  </div>
+  <div class="stat-divider"></div>
+  <div class="stat-item">
+    <span class="stat-value text-yellow">{{ stats.proposal.sent }}</span>
+    <span class="stat-label">Proposals sent</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value text-green">{{ stats.proposal.converted }}</span>
+    <span class="stat-label">Converted</span>
+  </div>
+</section>
+
+{# ── Filter panel ─────────────────────────────────────────────────────────── #}
+<section class="card">
+  <form method="get" action="/ui" id="filter-form" class="filter-form">
+    <div class="filter-grid">
+      <label class="form-label">
+        <span>Name</span>
+        <input type="text" name="q" value="{{ f_q }}" placeholder="Filter by name…">
+      </label>
+      <label class="form-label">
+        <span>Canton</span>
+        <select name="canton">
+          <option value="">All cantons</option>
+          {% for c in cantons %}
+            <option value="{{ c }}" {% if f_canton == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Industry</span>
+        <input type="text" name="industry" value="{{ f_industry }}" placeholder="e.g. IT, Bau, Handel…">
+      </label>
+      <label class="form-label">
+        <span>Tags</span>
+        <input type="text" name="tags" value="{{ f_tags }}" placeholder="e.g. saas, warm-lead…">
+      </label>
+      <label class="form-label">
+        <span>Review status</span>
+        <select name="review_status">
+          <option value="">All</option>
+          <option value="_none"       {% if f_review_status == '_none'       %}selected{% endif %}>Pending (none set)</option>
+          <option value="confirmed"   {% if f_review_status == 'confirmed'   %}selected{% endif %}>Confirmed</option>
+          <option value="interesting" {% if f_review_status == 'interesting' %}selected{% endif %}>Interesting</option>
+          <option value="rejected"    {% if f_review_status == 'rejected'    %}selected{% endif %}>Rejected</option>
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Proposal status</span>
+        <select name="proposal_status">
+          <option value="">All</option>
+          <option value="_none"     {% if f_proposal_status == '_none'     %}selected{% endif %}>Not sent (none set)</option>
+          <option value="sent"      {% if f_proposal_status == 'sent'      %}selected{% endif %}>Sent</option>
+          <option value="responded" {% if f_proposal_status == 'responded' %}selected{% endif %}>Responded</option>
+          <option value="converted" {% if f_proposal_status == 'converted' %}selected{% endif %}>Converted</option>
+          <option value="rejected"  {% if f_proposal_status == 'rejected'  %}selected{% endif %}>Rejected</option>
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Google searched</span>
+        <select name="google_searched">
+          <option value="">All</option>
+          <option value="yes" {% if f_google_searched == 'yes' %}selected{% endif %}>Searched</option>
+          <option value="no"  {% if f_google_searched == 'no'  %}selected{% endif %}>Not searched</option>
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Min score</span>
+        <input type="number" name="min_score" value="{{ f_min_score }}" min="0" max="100" placeholder="0–100">
+      </label>
+      <label class="form-label">
+        <span>Sort by</span>
+        <select name="sort">
+          <option value="-updated"  {% if sort == '-updated'  %}selected{% endif %}>Last updated ↓</option>
+          <option value="updated"   {% if sort == 'updated'   %}selected{% endif %}>Last updated ↑</option>
+          <option value="-score"    {% if sort == '-score'    %}selected{% endif %}>Score ↓</option>
+          <option value="score"     {% if sort == 'score'     %}selected{% endif %}>Score ↑</option>
+          <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
+          <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
+          <option value="canton"    {% if sort == 'canton'    %}selected{% endif %}>Canton A→Z</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="filter-actions">
+      <button type="submit">Apply filters</button>
+      <a class="button-link secondary" href="/ui">Clear</a>
+      <a class="button-link secondary" href="/ui/export.csv{{ '?' + filter_qs[1:] if filter_qs else '' }}">Export CSV</a>
+      <span class="filter-count">{{ total }} result{% if total != 1 %}s{% endif %}</span>
+    </div>
+  </form>
+</section>
+
+{# ── Leads table ──────────────────────────────────────────────────────────── #}
+<form method="post" action="/ui/bulk-update" id="bulk-form">
+  <input type="hidden" name="back_url" value="/ui?page={{ page }}{{ filter_qs }}">
+
+  <section class="card">
+    {# Bulk action bar #}
+    <div class="bulk-bar">
+      <label class="bulk-check-all">
+        <input type="checkbox" id="check-all"> Select all
+      </label>
+      <select name="bulk_action" class="bulk-select">
+        <option value="">— Bulk action —</option>
+        <optgroup label="Set review status">
+          <option value="review_status:confirmed">Review → Confirmed</option>
+          <option value="review_status:interesting">Review → Interesting</option>
+          <option value="review_status:rejected">Review → Rejected</option>
+          <option value="review_status:_clear">Review → Clear</option>
+        </optgroup>
+        <optgroup label="Set proposal status">
+          <option value="proposal_status:sent">Proposal → Sent</option>
+          <option value="proposal_status:responded">Proposal → Responded</option>
+          <option value="proposal_status:converted">Proposal → Converted</option>
+          <option value="proposal_status:rejected">Proposal → Rejected</option>
+          <option value="proposal_status:_clear">Proposal → Clear</option>
+        </optgroup>
+      </select>
+      <button type="submit" class="secondary-btn">Apply to selected</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-check"></th>
+            <th>Company</th>
+            <th>Canton</th>
+            <th>Industry</th>
+            <th>Website</th>
+            <th>Score</th>
+            <th>Review</th>
+            <th>Proposal</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in companies %}
+          <tr>
+            <td class="col-check">
+              <input type="checkbox" name="company_ids" value="{{ c.id }}" class="row-check">
+            </td>
+            <td>
+              <div class="company-name">{{ c.name }}</div>
+              <small class="muted">{{ c.uid }}</small>
+            </td>
+            <td>{{ c.canton or "-" }}</td>
+            <td>{{ c.industry or "-" }}</td>
+            <td class="url-cell">
+              {% if c.website_url %}
+                <a href="{{ c.website_url }}" target="_blank" rel="noopener noreferrer">{{ c.website_url }}</a>
+              {% elif c.website_checked_at %}
+                <span class="muted">no result</span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.website_match_score is not none %}
+                <span class="score-pill-sm {% if c.website_match_score >= 70 %}score-high{% elif c.website_match_score >= 40 %}score-mid{% else %}score-low{% endif %}">
+                  {{ c.website_match_score }}
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge-sm
+                {% if c.review_status == 'confirmed'   %}badge-green
+                {% elif c.review_status == 'interesting' %}badge-blue
+                {% elif c.review_status == 'rejected'    %}badge-red
+                {% else %}badge-gray{% endif %}">
+                {{ c.review_status or "pending" }}
+              </span>
+            </td>
+            <td>
+              {% if c.proposal_status and c.proposal_status != 'not_sent' %}
+                <span class="badge-sm
+                  {% if c.proposal_status == 'converted' %}badge-green
+                  {% elif c.proposal_status == 'responded' %}badge-blue
+                  {% elif c.proposal_status == 'rejected'  %}badge-red
+                  {% else %}badge-yellow{% endif %}">
+                  {{ c.proposal_status }}
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td><a class="button-link" href="/ui/companies/{{ c.id }}">Open</a></td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="9" class="empty-row">No companies match the current filters.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</form>
+
+{# ── Pagination ───────────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+<nav class="pagination">
+  {% if page > 1 %}
+    <a class="page-btn" href="/ui?page={{ page - 1 }}{{ filter_qs }}">← Prev</a>
+  {% else %}
+    <span class="page-btn page-btn--disabled">← Prev</span>
+  {% endif %}
+
+  {% for p in range([1, page - 2]|max, [total_pages + 1, page + 3]|min) %}
+    <a class="page-btn {% if p == page %}page-btn--active{% endif %}"
+       href="/ui?page={{ p }}{{ filter_qs }}">{{ p }}</a>
+  {% endfor %}
+
+  {% if page < total_pages %}
+    <a class="page-btn" href="/ui?page={{ page + 1 }}{{ filter_qs }}">Next →</a>
+  {% else %}
+    <span class="page-btn page-btn--disabled">Next →</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+<script>
+  const checkAll = document.getElementById('check-all');
+  checkAll.addEventListener('change', () => {
+    document.querySelectorAll('.row-check').forEach(cb => cb.checked = checkAll.checked);
+  });
+</script>
+
+{% endblock %}

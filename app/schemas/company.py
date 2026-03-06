@@ -30,7 +30,17 @@ class CompanyUpdate(BaseModel):
     purpose: str | None = None
     address: str | None = None
     website_url: str | None = None
+    website_checked_at: datetime | None = None
     zefix_raw: str | None = None
+    google_search_results_raw: str | None = None
+    website_match_score: int | None = None
+    review_status: str | None = None
+    proposal_status: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    tags: str | None = None
+    industry: str | None = None
 
 
 class CompanyRead(CompanyBase):
@@ -38,6 +48,15 @@ class CompanyRead(CompanyBase):
 
     id: int
     website_checked_at: datetime | None = None
+    google_search_results_raw: str | None = None
+    website_match_score: int | None = None
+    review_status: str | None = None
+    proposal_status: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    tags: str | None = None
+    industry: str | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[NoteRead] = []
