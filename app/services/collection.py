@@ -3,6 +3,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -239,19 +241,33 @@ def _fetch_prefix_with_fallback(
     active_only: bool,
     request_delay: float,
 ) -> list[Any]:
-    """Return all companies for *prefix*, expanding to double-letter prefixes if the cap is hit.
+    """Return all companies for *prefix*, expanding to double-letter prefixes if needed.
 
-    When a single-letter query returns exactly ZEFIX_MAX_ENTRIES results the API
-    has truncated the response.  We then query every two-letter sub-prefix
-    (e.g. "Aa" … "Az") and deduplicate by UID.  If a two-letter prefix still hits
-    the cap (extremely rare), it is logged but not expanded further.
+    Triggers double-letter expansion in two cases:
+    - The single-letter query returns exactly ZEFIX_MAX_ENTRIES (API truncated).
+    - The single-letter query returns HTTP 400 (Zefix rejects queries that would
+      return too many results).
+
+    In both cases every two-letter sub-prefix (e.g. "Aa"…"Az") is queried and
+    results are deduplicated by UID.  If a two-letter prefix still hits the cap
+    or returns 400 it is skipped (not expanded further).
     """
-    results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+    expand = False
+    results: list[Any] = []
+    try:
+        results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+        if len(results) >= ZEFIX_MAX_ENTRIES:
+            expand = True
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400:
+            expand = True
+        else:
+            raise
 
-    if len(results) < ZEFIX_MAX_ENTRIES:
+    if not expand:
         return results
 
-    # Cap hit — expand to double-letter sub-prefixes
+    # Cap hit or 400 — expand to double-letter sub-prefixes
     seen: set[str] = set()
     expanded: list[Any] = []
 
