@@ -142,9 +142,10 @@ def initial_collect(
     names: list[str],
     uids: list[str],
     search_max_results: int = 25,
-    import_limit_per_name: int = 10,
     active_only: bool = True,
     run_google: bool = True,
+    canton: str | None = None,
+    legal_form: str | None = None,
 ) -> dict[str, Any]:
     """Run a one-time collection from explicit UIDs and search terms."""
     stats: dict[str, Any] = {
@@ -180,12 +181,14 @@ def initial_collect(
                 name_clean,
                 max_results=search_max_results,
                 active_only=active_only,
+                canton=canton,
+                legal_form=legal_form,
             )
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"Search '{name_clean}': {exc}")
             continue
 
-        for result in results[:import_limit_per_name]:
+        for result in results:
             try:
                 company, created = import_company_from_zefix_uid(db, result.uid)
                 stats["created" if created else "updated"] += 1

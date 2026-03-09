@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.schemas.note import NoteRead
 
@@ -62,6 +62,16 @@ class CompanyRead(CompanyBase):
     notes: list[NoteRead] = []
 
 
+def _coerce_multilang(v: object) -> str | None:
+    """Extract a string from a Zefix multilingual dict or pass through as-is."""
+    if isinstance(v, dict):
+        return (
+            v.get("de") or v.get("fr") or v.get("it") or v.get("en")
+            or v.get("shortName") or next(iter(v.values()), None) or None
+        )
+    return v or None  # type: ignore[return-value]
+
+
 class ZefixSearchResult(BaseModel):
     """Lightweight result returned directly from the Zefix API search."""
 
@@ -71,6 +81,11 @@ class ZefixSearchResult(BaseModel):
     status: str | None = None
     municipality: str | None = None
     canton: str | None = None
+
+    @field_validator("legal_form", "status", "municipality", "canton", mode="before")
+    @classmethod
+    def coerce_multilang_fields(cls, v: object) -> str | None:
+        return _coerce_multilang(v)
 
 
 class GoogleSearchResult(BaseModel):

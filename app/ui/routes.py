@@ -622,7 +622,8 @@ async def start_initial(
     names: str = Form(""),           # newline-separated company name search terms
     uids: str = Form(""),            # newline-separated UIDs
     search_max_results: int = Form(25),
-    import_limit_per_name: int = Form(10),
+    canton: str = Form(""),
+    legal_form: str = Form(""),
     include_inactive: str = Form("false"),
     skip_google: str = Form("false"),
 ) -> RedirectResponse:
@@ -662,7 +663,8 @@ async def start_initial(
                     names=name_list,
                     uids=uid_list,
                     search_max_results=search_max_results,
-                    import_limit_per_name=import_limit_per_name,
+                    canton=canton.strip().upper() or None,
+                    legal_form=legal_form.strip() or None,
                     active_only=include_inactive != "true",
                     run_google=skip_google != "true",
                 )

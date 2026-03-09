@@ -32,12 +32,18 @@ def search_companies(
     *,
     max_results: int = 20,
     active_only: bool = False,
+    canton: str | None = None,
+    legal_form: str | None = None,
 ) -> list[ZefixSearchResult]:
     """Search for companies by name via the Zefix API."""
     url = f"{settings.zefix_api_base_url}/company/search"
     payload: dict[str, Any] = {"name": name, "maxEntries": max_results, "languageKey": "en"}
     if active_only:
         payload["activeOnly"] = True
+    if canton:
+        payload["canton"] = canton.upper()
+    if legal_form:
+        payload["legalForm"] = legal_form
 
     with httpx.Client(timeout=30.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
@@ -141,12 +147,23 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
 
     legal_form_raw = data.get("legalForm", {})
     if isinstance(legal_form_raw, dict):
-        legal_form = legal_form_raw.get("de") or legal_form_raw.get("shortName") or None
+        legal_form = (
+            legal_form_raw.get("de") or legal_form_raw.get("fr")
+            or legal_form_raw.get("it") or legal_form_raw.get("en")
+            or legal_form_raw.get("shortName")
+            or next(iter(legal_form_raw.values()), None) or None
+        )
     else:
         legal_form = str(legal_form_raw) if legal_form_raw else None
 
     status_raw = data.get("status", None)
-    status = str(status_raw) if status_raw else None
+    if isinstance(status_raw, dict):
+        status = (
+            status_raw.get("de") or status_raw.get("en")
+            or next(iter(status_raw.values()), None) or None
+        )
+    else:
+        status = str(status_raw) if status_raw else None
 
     municipality = data.get("municipality") or None
     canton = data.get("canton") or None

@@ -186,17 +186,23 @@
                   style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; resize:vertical; font-family:inherit; font-size:0.88rem;"></textarea>
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Max Zefix results per name</label>
         <input type="number" name="search_max_results" value="25" min="1" max="500"
                style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
       </div>
       <div>
-        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Import limit per name</label>
-        <input type="number" name="import_limit_per_name" value="10" min="1" max="500"
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Canton <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input type="text" name="canton" maxlength="2" placeholder="e.g. ZH"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; text-transform:uppercase;">
+        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">Two-letter code: ZH, BE, GE, ZG…</p>
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Legal form <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input type="text" name="legal_form" placeholder="e.g. AG"
                style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
-        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">How many of the returned matches to actually import.</p>
+        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">AG, GmbH, Einzelfirma, Genossenschaft…</p>
       </div>
     </div>
     <div style="margin-bottom:1rem; display:flex; flex-direction:column; gap:0.4rem;">
