@@ -10,9 +10,11 @@ from app import crud
 from app.api.google_search_client import search_website
 from app.config import settings
 from app.api.zefix_client import (
+    ALPHABET,
     SWISS_CANTONS,
+    ZEFIX_MAX_ENTRIES,
     _normalise_uid,
-    fetch_companies_by_canton,
+    fetch_companies_by_prefix,
     get_company as zefix_get_company,
     search_companies,
 )
@@ -199,46 +201,85 @@ def initial_collect(
     return stats
 
 
+def _fetch_prefix_with_fallback(
+    canton: str | None,
+    prefix: str,
+    active_only: bool,
+    request_delay: float,
+) -> list[Any]:
+    """Return all companies for *prefix*, expanding to double-letter prefixes if the cap is hit.
+
+    When a single-letter query returns exactly ZEFIX_MAX_ENTRIES results the API
+    has truncated the response.  We then query every two-letter sub-prefix
+    (e.g. "Aa" … "Az") and deduplicate by UID.  If a two-letter prefix still hits
+    the cap (extremely rare), it is logged but not expanded further.
+    """
+    results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+
+    if len(results) < ZEFIX_MAX_ENTRIES:
+        return results
+
+    # Cap hit — expand to double-letter sub-prefixes
+    seen: set[str] = set()
+    expanded: list[Any] = []
+
+    for letter in ALPHABET:
+        sub_prefix = prefix + letter
+        try:
+            sub_results = fetch_companies_by_prefix(sub_prefix, canton, active_only=active_only)
+        except Exception:  # noqa: BLE001
+            continue
+        for r in sub_results:
+            if r.uid and r.uid not in seen:
+                seen.add(r.uid)
+                expanded.append(r)
+        time.sleep(request_delay)
+
+    return expanded
+
+
 def bulk_import_zefix(
     db: Session,
     *,
     cantons: list[str] | None = None,
     active_only: bool = True,
-    page_size: int = 200,
     request_delay: float = 0.5,
     resume: bool = False,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """Import all companies from Zefix by iterating through cantons with pagination.
+    """Import all companies from Zefix using an alphabet-prefix sweep per canton.
 
-    Stores basic info (uid, name, legal_form, status, municipality, canton) from
-    the canton search API — no per-company detail call is made, keeping request
-    volume low. Run ``run_batch_collect`` with ``refresh_zefix=True`` later to
-    enrich purpose/address for specific companies.
+    For each canton, queries A–Z as name prefixes.  If any single-letter query
+    returns the API's hard cap (500), it automatically expands that letter into
+    26 two-letter sub-prefixes (e.g. "Ba" … "Bz") to capture the full set.
+
+    Checkpoint stored as (canton, prefix_index) so the run can be resumed after
+    an interruption.  ``last_offset`` stores the 0-based index into ALPHABET
+    (0 = "A", 25 = "Z") of the last completed prefix for the current canton.
 
     Args:
-        cantons: List of canton codes to scan. Defaults to all 26.
-        active_only: Only import companies with an active register entry.
-        page_size: Results per API page (Zefix cap is ~500).
+        cantons: Canton codes to scan. Defaults to all 26.
+        active_only: Only import active register entries.
         request_delay: Seconds to sleep between API calls.
-        resume: If True, look up the last incomplete run and continue from its checkpoint.
-        progress_cb: Optional callable(canton, offset, created, skipped) for logging.
+        resume: Continue from the last saved checkpoint if one exists.
+        progress_cb: Optional callable(canton, prefix, created, skipped).
     """
     target_cantons = cantons or SWISS_CANTONS
 
     # ── Checkpoint / resume ──────────────────────────────────────────────────
     run = None
     start_canton_idx = 0
-    start_offset = 0
+    start_prefix_idx = 0
 
     if resume:
         run = crud.get_last_incomplete_bulk(db)
         if run and run.last_canton and run.last_canton in target_cantons:
             start_canton_idx = target_cantons.index(run.last_canton)
-            start_offset = (run.last_offset or 0) + page_size
+            # resume after the last completed prefix
+            start_prefix_idx = (run.last_offset or 0) + 1
             existing_stats: dict[str, Any] = json.loads(run.stats_json or "{}")
         else:
-            run = None  # stale checkpoint, start fresh
+            run = None  # stale / unrelated checkpoint
 
     if run is None:
         run = crud.create_run(db, "bulk")
@@ -251,21 +292,23 @@ def bulk_import_zefix(
         "errors": existing_stats.get("errors", []),
     }
 
-    # ── Main loop ────────────────────────────────────────────────────────────
+    # ── Main sweep ───────────────────────────────────────────────────────────
     for canton in target_cantons[start_canton_idx:]:
-        offset = start_offset if canton == target_cantons[start_canton_idx] else 0
+        prefix_start = start_prefix_idx if canton == target_cantons[start_canton_idx] else 0
 
-        while True:
+        for prefix_idx, letter in enumerate(ALPHABET):
+            if prefix_idx < prefix_start:
+                continue
+
             try:
-                results = fetch_companies_by_canton(
-                    canton,
-                    page_size=page_size,
-                    offset=offset,
-                    active_only=active_only,
+                results = _fetch_prefix_with_fallback(
+                    canton, letter, active_only=active_only, request_delay=request_delay
                 )
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Canton {canton} offset {offset}: {exc}")
-                break
+                stats["errors"].append(f"Canton {canton} prefix {letter}: {exc}")
+                crud.update_checkpoint(db, run, canton, prefix_idx, stats)
+                time.sleep(request_delay)
+                continue
 
             for result in results:
                 if not result.uid:
@@ -286,19 +329,16 @@ def bulk_import_zefix(
                     )
                     stats["created"] += 1
 
-            # Persist checkpoint after every page
-            crud.update_checkpoint(db, run, canton, offset, stats)
+            # Checkpoint: last_offset = prefix index (0–25)
+            crud.update_checkpoint(db, run, canton, prefix_idx, stats)
 
             if progress_cb:
-                progress_cb(canton, offset, stats["created"], stats["skipped"])
+                progress_cb(canton, letter, stats["created"], stats["skipped"])
 
-            if len(results) < page_size:
-                break
-
-            offset += page_size
             time.sleep(request_delay)
 
         stats["cantons_done"] += 1
+        start_prefix_idx = 0  # reset for subsequent cantons
         time.sleep(request_delay)
 
     crud.complete_run(db, run, stats)

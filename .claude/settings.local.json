@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(\"c:/D/coding_projects/zefix_analyzer/app/models/__init__.py\":*)",
-      "Bash(\"c:/D/coding_projects/zefix_analyzer/app/templates/base.html\":*)"
+      "Bash(\"c:/D/coding_projects/zefix_analyzer/app/templates/base.html\":*)",
+      "WebSearch",
+      "WebFetch(domain:www.zefix.admin.ch)",
+      "WebFetch(domain:opendata.swiss)",
+      "WebFetch(domain:www.shab.ch)",
+      "WebFetch(domain:www.zefix.ch)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:renenyffenegger.ch)",
+      "WebFetch(domain:jupyter.zazuko.com)",
+      "WebFetch(domain:packagist.org)",
+      "WebFetch(domain:www.drupal.org)",
+      "WebFetch(domain:amtsblattportal.ch)"
     ]
   }
 }

@@ -14,6 +14,12 @@ SWISS_CANTONS = [
     "TI", "UR", "VD", "VS", "ZG", "ZH",
 ]
 
+# Letters used for prefix sweep; Zefix name search is case-insensitive
+ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+# Hard cap accepted by the Zefix search endpoint
+ZEFIX_MAX_ENTRIES = 500
+
 
 def _get_auth() -> httpx.BasicAuth | None:
     if settings.zefix_api_username and settings.zefix_api_password:
@@ -67,6 +73,37 @@ def fetch_companies_by_canton(
         "offset": offset,
         "languageKey": "en",
     }
+    if active_only:
+        payload["activeOnly"] = True
+
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(url, json=payload, auth=_get_auth())
+        response.raise_for_status()
+
+    data = response.json()
+    items = data if isinstance(data, list) else data.get("list", [])
+    return [_parse_company(item) for item in items]
+
+
+def fetch_companies_by_prefix(
+    prefix: str,
+    canton: str | None = None,
+    *,
+    active_only: bool = True,
+) -> list[ZefixSearchResult]:
+    """Fetch all companies whose name starts with *prefix*, optionally filtered by canton.
+
+    Uses the maximum page size (ZEFIX_MAX_ENTRIES).  The caller is responsible for
+    detecting a full page and expanding to double-letter prefixes if needed.
+    """
+    url = f"{settings.zefix_api_base_url}/company/search"
+    payload: dict[str, Any] = {
+        "name": prefix,
+        "maxEntries": ZEFIX_MAX_ENTRIES,
+        "languageKey": "en",
+    }
+    if canton:
+        payload["canton"] = canton
     if active_only:
         payload["activeOnly"] = True
 

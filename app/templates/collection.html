@@ -106,17 +106,11 @@
           All: {{ cantons | join(", ") }}
         </p>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
-        <div>
-          <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Page size</label>
-          <input type="number" name="page_size" value="200" min="10" max="500"
-                 style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
-        </div>
-        <div>
-          <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Delay (s)</label>
-          <input type="number" name="delay" value="0.5" min="0" max="10" step="0.1"
-                 style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
-        </div>
+      <div style="margin-bottom:0.8rem;">
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Delay (s)</label>
+        <input type="number" name="delay" value="0.5" min="0" max="10" step="0.1"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">Sleep between each prefix query. Increase if you hit rate limits.</p>
       </div>
       <div style="margin-bottom:1rem;">
         <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
@@ -166,6 +160,57 @@
 
 </div>
 
+{# ── Specific search / initial import ─────────────────────────────────────── #}
+<div class="card" style="margin-bottom: 2rem;">
+  <h3 style="margin-top:0;">Specific search</h3>
+  <p style="color:var(--muted); font-size:0.88rem; margin-top:0;">
+    Import companies by name search terms or by exact Zefix UIDs.
+    For name searches, Zefix is queried for matches and the top results imported.
+    Each imported company can optionally be enriched with Google Search immediately.
+    Use this for targeted lookups before or instead of a full bulk sweep.
+  </p>
+  <form method="post" action="/ui/collection/initial" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
+          Company names <span style="font-weight:400;color:var(--muted);">(one per line)</span>
+        </label>
+        <textarea name="names" rows="5" placeholder="e.g.&#10;Solarify AG&#10;Helvetic Ventures"
+                  style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; resize:vertical; font-family:inherit; font-size:0.88rem;"></textarea>
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
+          Zefix UIDs <span style="font-weight:400;color:var(--muted);">(one per line)</span>
+        </label>
+        <textarea name="uids" rows="5" placeholder="e.g.&#10;CHE-123.456.789&#10;CHE-987.654.321"
+                  style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; resize:vertical; font-family:inherit; font-size:0.88rem;"></textarea>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Max Zefix results per name</label>
+        <input type="number" name="search_max_results" value="25" min="1" max="500"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Import limit per name</label>
+        <input type="number" name="import_limit_per_name" value="10" min="1" max="500"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">How many of the returned matches to actually import.</p>
+      </div>
+    </div>
+    <div style="margin-bottom:1rem; display:flex; flex-direction:column; gap:0.4rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="include_inactive" value="true"> Include inactive companies
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="skip_google" value="true"> Skip Google enrichment
+      </label>
+    </div>
+    <button class="button-link" type="submit">Start specific search</button>
+  </form>
+</div>
+
 {# ── Run history ───────────────────────────────────────────────────────────── #}
 <div class="card">
   <h3 style="margin-top:0;">Run history</h3>
@@ -188,8 +233,8 @@
             <td style="padding:0.4rem 0.6rem; color:var(--muted);">{{ run.id }}</td>
             <td style="padding:0.4rem 0.6rem;">
               <span style="padding:0.15rem 0.5rem; border-radius:3px; font-size:0.8rem;
-                background:{% if run.run_type == 'bulk' %}#e8f4fd{% else %}#e8fdf4{% endif %};
-                color:{% if run.run_type == 'bulk' %}var(--accent){% else %}var(--accent-2){% endif %};">
+                background:{% if run.run_type == 'bulk' %}#e8f4fd{% elif run.run_type == 'initial' %}#f3eeff{% else %}#e8fdf4{% endif %};
+                color:{% if run.run_type == 'bulk' %}var(--accent){% elif run.run_type == 'initial' %}#6b35c2{% else %}var(--accent-2){% endif %};">
                 {{ run.run_type }}
               </span>
             </td>
@@ -202,12 +247,19 @@
               {% endif %}
             </td>
             <td style="padding:0.4rem 0.6rem; color:var(--muted); font-size:0.82rem;">
-              {% if run.last_canton %}{{ run.last_canton }} +{{ run.last_offset or 0 }}{% else %}—{% endif %}
+              {% if run.last_canton and run.run_type == "bulk" %}
+                {{ run.last_canton }} / {{ "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[run.last_offset or 0] }}
+              {% elif run.last_canton %}
+                {{ run.last_canton }}
+              {% else %}—{% endif %}
             </td>
             <td style="padding:0.4rem 0.6rem; font-size:0.82rem;">
               {% if stats %}
                 {% if run.run_type == "bulk" %}
                   {{ stats.get("created", "—") }} created, {{ stats.get("skipped", "—") }} skipped
+                  {% if stats.get("errors") %}&nbsp;·&nbsp; <span style="color:var(--danger);">{{ stats.errors | length }} err</span>{% endif %}
+                {% elif run.run_type == "initial" %}
+                  {{ stats.get("created", "—") }} created, {{ stats.get("updated", "—") }} updated
                   {% if stats.get("errors") %}&nbsp;·&nbsp; <span style="color:var(--danger);">{{ stats.errors | length }} err</span>{% endif %}
                 {% else %}
                   {{ stats.get("google_enriched", "—") }} enriched

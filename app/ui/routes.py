@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
 from app.database import SessionLocal, get_db
-from app.services.collection import bulk_import_zefix, enrich_company_website, run_batch_collect
+from app.services.collection import bulk_import_zefix, enrich_company_website, initial_collect, run_batch_collect
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
 
@@ -505,7 +505,6 @@ def ui_collection(
 async def start_bulk(
     request: Request,
     cantons: str = Form(""),          # comma-separated, blank = all
-    page_size: int = Form(200),
     delay: float = Form(0.5),
     include_inactive: str = Form("false"),
     resume: str = Form("false"),
@@ -530,8 +529,8 @@ async def start_bulk(
     request.app.state.collection_task = task
 
     def _run() -> None:
-        def progress_cb(canton: str, offset: int, created: int, skipped: int) -> None:
-            task["message"] = f"Canton {canton} offset {offset} — {created} created, {skipped} skipped"
+        def progress_cb(canton: str, prefix: str, created: int, skipped: int) -> None:
+            task["message"] = f"Canton {canton} prefix {prefix} — {created} created, {skipped} skipped"
             task["stats"] = {"created": created, "skipped": skipped}
 
         try:
@@ -540,7 +539,6 @@ async def start_bulk(
                     db,
                     cantons=canton_list,
                     active_only=include_inactive != "true",
-                    page_size=page_size,
                     request_delay=delay,
                     resume=resume == "true",
                     progress_cb=progress_cb,
@@ -607,6 +605,71 @@ async def start_batch(
                 f"Done — {stats['google_enriched']} enriched, "
                 f"{stats['google_no_result']} no result, "
                 f"{len(stats['errors'])} errors"
+            )
+        except Exception as exc:  # noqa: BLE001
+            task["error"] = str(exc)
+            task["message"] = "Failed"
+        finally:
+            task["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/collection/initial", include_in_schema=False)
+async def start_initial(
+    request: Request,
+    names: str = Form(""),           # newline-separated company name search terms
+    uids: str = Form(""),            # newline-separated UIDs
+    search_max_results: int = Form(25),
+    import_limit_per_name: int = Form(10),
+    include_inactive: str = Form("false"),
+    skip_google: str = Form("false"),
+) -> RedirectResponse:
+    if _task_is_running(request.app.state):
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    name_list = [n.strip() for n in names.splitlines() if n.strip()]
+    uid_list = [u.strip() for u in uids.splitlines() if u.strip()]
+
+    if not name_list and not uid_list:
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus('Enter at least one company name or UID')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    task: dict = {
+        "type": "initial",
+        "label": (
+            f"Specific search — {len(name_list)} name(s), {len(uid_list)} UID(s)"
+        ),
+        "started_at": time.time(),
+        "message": "Starting…",
+        "stats": {},
+        "error": None,
+        "done": False,
+    }
+    request.app.state.collection_task = task
+
+    def _run() -> None:
+        try:
+            with SessionLocal() as db:
+                stats = initial_collect(
+                    db,
+                    names=name_list,
+                    uids=uid_list,
+                    search_max_results=search_max_results,
+                    import_limit_per_name=import_limit_per_name,
+                    active_only=include_inactive != "true",
+                    run_google=skip_google != "true",
+                )
+            task["stats"] = stats
+            task["message"] = (
+                f"Done — {stats['created']} created, {stats['updated']} updated, "
+                f"{stats['google_enriched']} enriched, {len(stats['errors'])} errors"
             )
         except Exception as exc:  # noqa: BLE001
             task["error"] = str(exc)
