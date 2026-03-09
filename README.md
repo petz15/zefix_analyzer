@@ -221,9 +221,24 @@ Returns the list of valid canton codes. The app hardcodes all 26: `AG AI AR BE B
 
 The API is publicly accessible without credentials for read access. If your deployment requires HTTP Basic Auth (e.g. a Zefix test environment), set `ZEFIX_API_USERNAME` and `ZEFIX_API_PASSWORD` in `.env`.
 
-### Rate limits
+### Rate limiting
 
-Zefix does not publish official rate limits. The `--delay` flag (default `0.5s` between pages) is conservative enough to avoid any observed throttling during a full 26-canton sweep.
+Zefix does not publish official rate limits or quota documentation.
+
+**How the app limits its own request rate:**
+
+The `bulk` import loop calls `time.sleep(request_delay)` (default `0.5s`) after every page of results and again between cantons. This means a full 26-canton sweep at `--page-size 200` and `--delay 0.5` produces roughly 1 request every 0.5 seconds. There is no adaptive backoff — if a request fails, the error is recorded and the sweep moves on to the next canton.
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `--delay` | `0.5s` | Sleep between every API page and between cantons |
+| `--page-size` | `200` | Results per request (Zefix cap ~500); fewer pages = fewer requests |
+
+**Recommendations:**
+- Keep `--delay` at `0.5s` or higher for a full sweep
+- If you get HTTP 429 or connection errors in the logs, increase `--delay` to `1.0` or `2.0`
+- The `initial` mode (name search) has no built-in delay — keep the number of search terms small
+- There is no retry logic; use `--resume` to continue after a failed run
 
 ---
 
