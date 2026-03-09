@@ -278,6 +278,7 @@ Migrations live in `alembic/versions/`. Current chain:
 - [ ] **Preserve filters on "Back to list"** — pass referrer or session state so filters survive opening a company detail
 - [ ] **Inline status dropdowns in table** — change review/proposal status without opening the company page or using bulk actions
 - [ ] **Zefix detail enrichment pass** — dedicated `batch --enrich-zefix-only` mode to fill `purpose`/`address` for bulk-imported companies (improves scoring quality)
+- [ ] **Per-company Zefix refresh** — button on the company detail page to re-fetch full details from Zefix for a single company (`GET /company/uid/{uid}`). Bulk re-fetching is impractical due to the Zefix rate limit (~700k companies × 1 request each = days of API calls); individual refresh on demand is the safe alternative. Should preserve manually entered fields (contact info, notes, review/proposal status) and only overwrite Zefix-sourced fields.
 - [ ] **"Not searched vs no result" distinction** — show a visual indicator in the table for companies that were searched but returned no Google results, vs never searched
 
 ### Medium-term
