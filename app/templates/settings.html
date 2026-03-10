@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
 {% if active_task and ((scoring_task and not scoring_task.done) or (google_scoring_task and not google_scoring_task.done)) %}
-{% block extra_head %}<meta http-equiv="refresh" content="3">{% endblock %}
+{% block extra_head %}<script>
+(function(){setInterval(function(){if(!document.querySelector(':focus'))location.reload();},10000);})();
+</script>{% endblock %}
 {% endif %}
 
 {% block content %}

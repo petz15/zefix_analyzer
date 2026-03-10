@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
 {% if active_task %}
-{% block extra_head %}<meta http-equiv="refresh" content="5">{% endblock %}
+{% block extra_head %}<script>
+(function(){setInterval(function(){if(!document.querySelector(':focus'))location.reload();},10000);})();
+</script>{% endblock %}
 {% endif %}
 
 {% block content %}

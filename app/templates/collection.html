@@ -3,7 +3,9 @@
 
 {% set running = task and not task.done %}
 {% if running %}
-  <meta http-equiv="refresh" content="3">
+  <script>
+  (function(){setInterval(function(){if(!document.querySelector(':focus'))location.reload();},10000);})();
+  </script>
 {% endif %}
 
 <h2 style="margin-bottom: 1.2rem;">Data Collection</h2>
