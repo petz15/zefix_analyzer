@@ -692,6 +692,7 @@ def _run_job(app, job_id: int) -> None:
         )
 
         params = json.loads(job.params_json or "{}")
+        resume_from = max(0, int(job.progress_done or 0))
 
         def _assert_not_cancelled() -> None:
             db.refresh(job)
@@ -707,8 +708,10 @@ def _run_job(app, job_id: int) -> None:
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
-                stats = recalculate_zefix_scores(db, progress_cb=_progress)
+                stats = recalculate_zefix_scores(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = f"Done — {stats['updated']} companies recalculated, {len(stats['errors'])} errors"
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "recalculate_google_scores":
                 def _progress(done: int, total: int, stats: dict) -> None:
@@ -718,11 +721,13 @@ def _run_job(app, job_id: int) -> None:
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
-                stats = recalculate_google_scores(db, progress_cb=_progress)
+                stats = recalculate_google_scores(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = (
                     f"Done — {stats['updated']} updated, {stats['skipped']} skipped, "
                     f"{len(stats['errors'])} errors"
                 )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "bulk":
                 def _progress(canton: str, prefix: str, created: int, updated: int) -> None:
@@ -738,7 +743,7 @@ def _run_job(app, job_id: int) -> None:
                     cantons=params.get("cantons"),
                     active_only=params.get("active_only", True),
                     request_delay=float(params.get("delay", 0.5)),
-                    resume=params.get("resume", False),
+                    resume=True,
                     progress_cb=_progress,
                 )
                 done_msg = f"Done — {stats['created']} created, {stats['updated']} updated, {len(stats['errors'])} errors"
@@ -758,21 +763,24 @@ def _run_job(app, job_id: int) -> None:
                     only_missing_website=bool(params.get("only_missing_website", True)),
                     refresh_zefix=bool(params.get("refresh_zefix", False)),
                     run_google=bool(params.get("run_google", True)),
+                    resume_from=resume_from,
                     progress_cb=_progress,
                 )
                 done_msg = (
                     f"Done — {stats['google_enriched']} enriched, "
                     f"{stats['google_no_result']} no result, {len(stats['errors'])} errors"
                 )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "initial":
-                def _progress(stats: dict) -> None:
+                def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = (
-                        f"Collected {stats.get('created', 0)} created, "
+                        f"Collected {done}/{total} — {stats.get('created', 0)} created, "
                         f"{stats.get('updated', 0)} updated"
                     )
-                    crud.update_progress(db, job, message=msg, stats=stats)
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
@@ -784,12 +792,15 @@ def _run_job(app, job_id: int) -> None:
                     legal_form=params.get("legal_form"),
                     active_only=bool(params.get("active_only", True)),
                     run_google=bool(params.get("run_google", True)),
+                    resume_from=resume_from,
                     progress_cb=_progress,
                 )
                 done_msg = (
                     f"Done — {stats['created']} created, {stats['updated']} updated, "
                     f"{stats['google_enriched']} enriched, {len(stats['errors'])} errors"
                 )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "detail":
                 def _progress(done: int, total: int, stats: dict) -> None:
@@ -804,10 +815,13 @@ def _run_job(app, job_id: int) -> None:
                     cantons=params.get("cantons"),
                     uids=params.get("uids"),
                     score_if_missing=bool(params.get("score_if_missing", True)),
+                    resume_from=resume_from,
                     request_delay=float(params.get("delay", 0.3)),
                     progress_cb=_progress,
                 )
                 done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {len(stats['errors'])} errors"
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")
 

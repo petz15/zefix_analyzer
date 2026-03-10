@@ -282,6 +282,7 @@ def recalculate_zefix_scores(
     db: Session,
     *,
     batch_size: int = 500,
+    resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Recompute zefix_score for every company using the current scoring algorithm.
@@ -296,7 +297,7 @@ def recalculate_zefix_scores(
     scoring_config = _load_scoring_config(db)
 
     total = db.query(Company).count()
-    offset = 0
+    offset = max(0, min(resume_from, total))
 
     while True:
         batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
@@ -326,7 +327,7 @@ def recalculate_zefix_scores(
                 stats["errors"].append(f"{company.uid}: {exc}")
 
         db.commit()
-        offset += batch_size
+        offset += len(batch)
 
         if progress_cb:
             progress_cb(min(offset, total), total, stats)
@@ -384,13 +385,14 @@ def recalculate_google_scores(
     db: Session,
     *,
     batch_size: int = 500,
+    resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Recompute website_match_score from stored Google results for all companies."""
     stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
 
     total = db.query(Company).count()
-    offset = 0
+    offset = max(0, min(resume_from, total))
 
     while True:
         batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
@@ -422,7 +424,7 @@ def recalculate_google_scores(
                 stats["errors"].append(f"{company.uid}: {exc}")
 
         db.commit()
-        offset += batch_size
+        offset += len(batch)
 
         if progress_cb:
             progress_cb(min(offset, total), total, stats)
@@ -478,6 +480,7 @@ def initial_collect(
     run_google: bool = True,
     canton: str | None = None,
     legal_form: str | None = None,
+    resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a one-time collection from explicit UIDs and search terms."""
@@ -489,23 +492,15 @@ def initial_collect(
         "errors": [],
     }
 
+    target_uids: list[str] = []
+    seen: set[str] = set()
+
     for uid in uids:
         uid_clean = uid.strip()
-        if not uid_clean:
+        if not uid_clean or uid_clean in seen:
             continue
-        try:
-            company, created = import_company_from_zefix_uid(db, uid_clean)
-            stats["created" if created else "updated"] += 1
-            if run_google:
-                enriched, _ = enrich_company_website(db, company)
-                if enriched:
-                    stats["google_enriched"] += 1
-                else:
-                    stats["google_no_result"] += 1
-        except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"UID {uid_clean}: {exc}")
-        if progress_cb:
-            progress_cb(stats)
+        seen.add(uid_clean)
+        target_uids.append(uid_clean)
 
     for name in names:
         name_clean = name.strip()
@@ -524,19 +519,29 @@ def initial_collect(
             continue
 
         for result in results:
-            try:
-                company, created = import_company_from_zefix_uid(db, result.uid)
-                stats["created" if created else "updated"] += 1
-                if run_google:
-                    enriched, _ = enrich_company_website(db, company)
-                    if enriched:
-                        stats["google_enriched"] += 1
-                    else:
-                        stats["google_no_result"] += 1
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"UID {result.uid} from search '{name_clean}': {exc}")
-            if progress_cb:
-                progress_cb(stats)
+            uid_clean = (result.uid or "").strip()
+            if not uid_clean or uid_clean in seen:
+                continue
+            seen.add(uid_clean)
+            target_uids.append(uid_clean)
+
+    total = len(target_uids)
+    start_idx = max(0, min(resume_from, total))
+
+    for idx, uid_clean in enumerate(target_uids[start_idx:], start=start_idx + 1):
+        try:
+            company, created = import_company_from_zefix_uid(db, uid_clean)
+            stats["created" if created else "updated"] += 1
+            if run_google:
+                enriched, _ = enrich_company_website(db, company)
+                if enriched:
+                    stats["google_enriched"] += 1
+                else:
+                    stats["google_no_result"] += 1
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"UID {uid_clean}: {exc}")
+        if progress_cb:
+            progress_cb(idx, total, stats)
 
     return stats
 
@@ -794,6 +799,7 @@ def run_zefix_detail_collect(
     cantons: list[str] | None = None,
     uids: list[str] | None = None,
     score_if_missing: bool = True,
+    resume_from: int = 0,
     request_delay: float = 0.3,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
@@ -850,7 +856,8 @@ def run_zefix_detail_collect(
     stats["selected"] = len(companies)
     total = len(companies)
 
-    for i, company in enumerate(companies, 1):
+    start_idx = max(0, min(resume_from, total))
+    for i, company in enumerate(companies[start_idx:], start=start_idx + 1):
         try:
             updated, _ = import_company_from_zefix_uid(db, company.uid)
             stats["updated"] += 1
@@ -888,6 +895,7 @@ def run_batch_collect(
     only_missing_website: bool = True,
     refresh_zefix: bool = False,
     run_google: bool = True,
+    resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a recurring batch process over companies already in your DB."""
@@ -928,10 +936,12 @@ def run_batch_collect(
         return (-score, distance if distance is not None else float("inf"), company.id)
 
     ordered = sorted(candidates, key=_batch_order_key)
-    companies = ordered[skip: skip + limit]
-    stats["selected"] = len(companies)
+    planned = ordered[skip: skip + limit]
+    start_idx = max(0, min(resume_from, len(planned)))
+    companies = planned[start_idx:]
+    stats["selected"] = len(planned)
 
-    for i, company in enumerate(companies, 1):
+    for i, company in enumerate(companies, start=start_idx + 1):
         current = company
         if refresh_zefix:
             try:
