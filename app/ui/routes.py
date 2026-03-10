@@ -16,6 +16,7 @@ from app.database import SessionLocal, get_db
 from app.services.collection import (
     bulk_import_zefix,
     enrich_company_website,
+    import_company_from_zefix_uid,
     initial_collect,
     run_batch_collect,
     run_zefix_detail_collect,
@@ -271,6 +272,15 @@ def ui_company_detail(
         except Exception:  # noqa: BLE001
             pass
 
+    old_names: list = []
+    if company.old_names:
+        try:
+            raw_old = json.loads(company.old_names)
+            if isinstance(raw_old, list):
+                old_names = [str(n) for n in raw_old if n]
+        except Exception:  # noqa: BLE001
+            pass
+
     return templates.TemplateResponse(
         "company_detail.html",
         {
@@ -279,10 +289,31 @@ def ui_company_detail(
             "notes": notes,
             "zefix_pretty": zefix_pretty,
             "google_results": google_results,
+            "old_names": old_names,
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "message": message,
             "error": error,
         },
+    )
+
+
+@router.post("/ui/companies/{company_id}/zefix-refresh", include_in_schema=False)
+def zefix_refresh_company(company_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    company = crud.get_company(db, company_id)
+    if not company:
+        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        import_company_from_zefix_uid(db, company.uid)
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(
+            url=f"/ui/companies/{company_id}?error={quote_plus(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    return RedirectResponse(
+        url=f"/ui/companies/{company_id}?message={quote_plus('Zefix data refreshed')}",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
@@ -536,9 +567,9 @@ async def start_bulk(
     request.app.state.collection_task = task
 
     def _run() -> None:
-        def progress_cb(canton: str, prefix: str, created: int, skipped: int) -> None:
-            task["message"] = f"Canton {canton} prefix {prefix} — {created} created, {skipped} skipped"
-            task["stats"] = {"created": created, "skipped": skipped}
+        def progress_cb(canton: str, prefix: str, created: int, updated: int) -> None:
+            task["message"] = f"Canton {canton} prefix {prefix} — {created} created, {updated} updated"
+            task["stats"] = {"created": created, "updated": updated}
 
         try:
             with SessionLocal() as db:
@@ -552,7 +583,7 @@ async def start_bulk(
                 )
             task["stats"] = stats
             task["message"] = (
-                f"Done — {stats['created']} created, {stats['skipped']} skipped, "
+                f"Done — {stats['created']} created, {stats['updated']} updated, "
                 f"{len(stats['errors'])} errors"
             )
         except Exception as exc:  # noqa: BLE001

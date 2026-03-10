@@ -32,7 +32,7 @@
           {% if task.stats %}
             <p style="margin:0.3rem 0 0; font-size:0.82rem; color:var(--muted);">
               {% if task.type == "bulk" %}
-                {{ task.stats.get("created", 0) }} created &nbsp;·&nbsp; {{ task.stats.get("skipped", 0) }} skipped
+                {{ task.stats.get("created", 0) }} created &nbsp;·&nbsp; {{ task.stats.get("updated", 0) }} updated
               {% elif task.type == "detail" %}
                 {{ task.stats.get("updated", 0) }} updated &nbsp;·&nbsp; {{ task.stats.get("scored", 0) }} scored
               {% else %}
@@ -316,7 +316,7 @@
             <td style="padding:0.4rem 0.6rem; font-size:0.82rem;">
               {% if stats %}
                 {% if run.run_type == "bulk" %}
-                  {{ stats.get("created", "—") }} created, {{ stats.get("skipped", "—") }} skipped
+                  {{ stats.get("created", "—") }} created, {{ stats.get("updated", "—") }} updated
                 {% elif run.run_type == "initial" %}
                   {{ stats.get("created", "—") }} created, {{ stats.get("updated", "—") }} updated
                 {% elif run.run_type == "detail" %}

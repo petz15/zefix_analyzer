@@ -26,6 +26,27 @@ class CompanyBase(BaseModel):
     address: str | None = None
     website_url: str | None = None
     industry: str | None = None
+    # Zefix administrative identifiers
+    ehraid: str | None = None
+    chid: str | None = None
+    legal_seat_id: int | None = None
+    legal_form_id: int | None = None
+    legal_form_uid: str | None = None
+    legal_form_short_name: str | None = None
+    sogc_date: str | None = None
+    deletion_date: str | None = None
+    # Extended detail fields (from per-UID Zefix endpoint)
+    sogc_pub: str | None = None
+    capital_nominal: str | None = None
+    capital_currency: str | None = None
+    head_offices: str | None = None
+    further_head_offices: str | None = None
+    branch_offices: str | None = None
+    has_taken_over: str | None = None
+    was_taken_over_by: str | None = None
+    audit_companies: str | None = None
+    old_names: str | None = None
+    cantonal_excerpt_web: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -57,6 +78,27 @@ class CompanyUpdate(BaseModel):
     contact_phone: str | None = None
     tags: str | None = None
     industry: str | None = None
+    # Zefix administrative identifiers
+    ehraid: str | None = None
+    chid: str | None = None
+    legal_seat_id: int | None = None
+    legal_form_id: int | None = None
+    legal_form_uid: str | None = None
+    legal_form_short_name: str | None = None
+    sogc_date: str | None = None
+    deletion_date: str | None = None
+    # Extended detail fields
+    sogc_pub: str | None = None
+    capital_nominal: str | None = None
+    capital_currency: str | None = None
+    head_offices: str | None = None
+    further_head_offices: str | None = None
+    branch_offices: str | None = None
+    has_taken_over: str | None = None
+    was_taken_over_by: str | None = None
+    audit_companies: str | None = None
+    old_names: str | None = None
+    cantonal_excerpt_web: str | None = None
 
 
 class CompanyRead(CompanyBase):
@@ -87,6 +129,15 @@ class ZefixSearchResult(BaseModel):
     municipality: str | None = None
     canton: str | None = None
     purpose: str | None = None
+    # Extended fields populated from search response when available
+    ehraid: str | None = None
+    chid: str | None = None
+    legal_seat_id: int | None = None
+    legal_form_id: int | None = None
+    legal_form_uid: str | None = None
+    legal_form_short_name: str | None = None
+    sogc_date: str | None = None
+    deletion_date: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod

@@ -37,6 +37,27 @@ class Company(Base):
     # Comma-separated free-form labels, e.g. "saas,b2b,warm-lead"
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Zefix administrative identifiers
+    ehraid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chid: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    legal_seat_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    legal_form_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    legal_form_uid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    legal_form_short_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sogc_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deletion_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Extended Zefix detail fields (populated from per-UID endpoint only)
+    sogc_pub: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    capital_nominal: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    capital_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    head_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    further_head_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    branch_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    has_taken_over: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    was_taken_over_by: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    audit_companies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    old_names: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 

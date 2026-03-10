@@ -17,8 +17,11 @@ SWISS_CANTONS = [
 # Letters used for prefix sweep; Zefix name search is case-insensitive
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+# Digits + letters for prefix sweep (companies can start with a number)
+ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 # Hard cap accepted by the Zefix search endpoint
-ZEFIX_MAX_ENTRIES = 500
+ZEFIX_MAX_ENTRIES = 20000
 
 
 def _get_auth() -> httpx.BasicAuth | None:
@@ -61,17 +64,7 @@ def fetch_companies_by_canton(
     offset: int = 0,
     active_only: bool = True,
 ) -> list[ZefixSearchResult]:
-    """Fetch one page of companies for a given canton.
-
-    Args:
-        canton: Two-letter canton code, e.g. ``"ZH"``.
-        page_size: Number of results per page (max accepted by the API: 500).
-        offset: Zero-based record offset for pagination.
-        active_only: When True only include companies with an active register entry.
-
-    Returns:
-        List of :class:`ZefixSearchResult`. An empty list signals end-of-pages.
-    """
+    """Fetch one page of companies for a given canton."""
     url = f"{settings.zefix_api_base_url}/company/search"
     payload: dict[str, Any] = {
         "canton": canton,
@@ -97,11 +90,7 @@ def fetch_companies_by_prefix(
     *,
     active_only: bool = True,
 ) -> list[ZefixSearchResult]:
-    """Fetch all companies whose name starts with *prefix*, optionally filtered by canton.
-
-    Uses the maximum page size (ZEFIX_MAX_ENTRIES).  The caller is responsible for
-    detecting a full page and expanding to double-letter prefixes if needed.
-    """
+    """Fetch all companies whose name starts with *prefix*, optionally filtered by canton."""
     url = f"{settings.zefix_api_base_url}/company/search"
     payload: dict[str, Any] = {
         "name": prefix,
@@ -139,6 +128,42 @@ def get_company(uid: str) -> dict[str, Any]:
     return data
 
 
+def _parse_legal_form(lf: Any) -> tuple[str | None, int | None, str | None, str | None]:
+    """Parse a legalForm value into (display_name, id, uid, short_name).
+
+    Handles both the flat dict ``{"de": "...", "shortName": "AG"}`` returned by
+    the search endpoint and the nested dict returned by the detail endpoint:
+    ``{"id": 1, "uid": "...", "name": {"de": "..."}, "shortName": {"de": "AG"}}``.
+    """
+    if not lf or not isinstance(lf, dict):
+        return (str(lf) if lf else None, None, None, None)
+
+    lf_id: int | None = lf.get("id")
+    lf_uid: str | None = lf.get("uid") or None
+
+    # Display name: try nested name dict first, then flat de/fr/it/en keys
+    name_raw = lf.get("name") or lf
+    if isinstance(name_raw, dict):
+        display = (
+            name_raw.get("de") or name_raw.get("fr") or name_raw.get("it")
+            or name_raw.get("en") or None
+        )
+    else:
+        display = str(name_raw) if name_raw else None
+
+    # Fall back to shortName if no display name found
+    short_raw = lf.get("shortName") or lf.get("shortNameDe")
+    if isinstance(short_raw, dict):
+        short = short_raw.get("de") or next(iter(short_raw.values()), None)
+    else:
+        short = str(short_raw) if short_raw else None
+
+    if not display:
+        display = short
+
+    return display, lf_id, lf_uid, short
+
+
 def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     """Map a raw Zefix API company dict to a :class:`ZefixSearchResult`."""
     uid = data.get("uid", "") or ""
@@ -150,16 +175,9 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     else:
         name = str(name_raw)
 
-    legal_form_raw = data.get("legalForm", {})
-    if isinstance(legal_form_raw, dict):
-        legal_form = (
-            legal_form_raw.get("de") or legal_form_raw.get("fr")
-            or legal_form_raw.get("it") or legal_form_raw.get("en")
-            or legal_form_raw.get("shortName")
-            or next(iter(legal_form_raw.values()), None) or None
-        )
-    else:
-        legal_form = str(legal_form_raw) if legal_form_raw else None
+    legal_form_display, legal_form_id, legal_form_uid, legal_form_short = _parse_legal_form(
+        data.get("legalForm")
+    )
 
     status_raw = data.get("status", None)
     if isinstance(status_raw, dict):
@@ -170,7 +188,7 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     else:
         status = str(status_raw) if status_raw else None
 
-    municipality = data.get("municipality") or None
+    municipality = data.get("municipality") or data.get("legalSeat") or None
     canton = data.get("canton") or None
 
     purpose_raw = data.get("purpose") or data.get("purposes") or None
@@ -185,14 +203,43 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     else:
         purpose = str(purpose_raw) if purpose_raw else None
 
+    # Administrative identifiers
+    ehraid_raw = data.get("ehraId") or data.get("ehraid") or data.get("ehra_id")
+    ehraid = str(ehraid_raw) if ehraid_raw is not None else None
+
+    chid_raw = data.get("chid")
+    chid = str(chid_raw) if chid_raw is not None else None
+
+    legal_seat_id_raw = data.get("legalSeatId") or data.get("legal_seat_id")
+    legal_seat_id: int | None = None
+    if legal_seat_id_raw is not None:
+        try:
+            legal_seat_id = int(legal_seat_id_raw)
+        except (ValueError, TypeError):
+            pass
+
+    sogc_date_raw = data.get("sogcDate") or data.get("sogc_date")
+    sogc_date = str(sogc_date_raw) if sogc_date_raw else None
+
+    deletion_date_raw = data.get("deletionDate") or data.get("deletion_date")
+    deletion_date = str(deletion_date_raw) if deletion_date_raw else None
+
     return ZefixSearchResult(
         uid=uid,
         name=name,
-        legal_form=legal_form,
+        legal_form=legal_form_display,
+        legal_form_id=legal_form_id,
+        legal_form_uid=legal_form_uid,
+        legal_form_short_name=legal_form_short,
         status=status,
         municipality=municipality,
         canton=canton,
         purpose=purpose,
+        ehraid=ehraid,
+        chid=chid,
+        legal_seat_id=legal_seat_id,
+        sogc_date=sogc_date,
+        deletion_date=deletion_date,
     )
 
 

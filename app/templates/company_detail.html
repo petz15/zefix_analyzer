@@ -6,7 +6,12 @@
 <section class="card">
   <div class="stack-header">
     <h2>{{ company.name }}</h2>
-    <a class="button-link secondary" href="/ui">Back to list</a>
+    <div style="display:flex; gap:0.5rem; align-items:center;">
+      <form method="post" action="/ui/companies/{{ company.id }}/zefix-refresh">
+        <button type="submit" class="button-link secondary" style="font-size:0.85rem;">↻ Refresh from Zefix</button>
+      </form>
+      <a class="button-link secondary" href="/ui">Back to list</a>
+    </div>
   </div>
 
   {# Status badges row #}
@@ -77,6 +82,15 @@
         -
       {% endif %}
     </dd>
+    {% if company.capital_nominal %}
+    <dt>Capital</dt><dd>{{ company.capital_nominal }}{% if company.capital_currency %} {{ company.capital_currency }}{% endif %}</dd>
+    {% endif %}
+    {% if company.cantonal_excerpt_web %}
+    <dt>Registry</dt><dd><a href="{{ company.cantonal_excerpt_web }}" target="_blank" rel="noopener noreferrer">Cantonal excerpt ↗</a></dd>
+    {% endif %}
+    {% if old_names %}
+    <dt>Old names</dt><dd>{{ old_names | join(", ") }}</dd>
+    {% endif %}
     <dt>Google searched</dt><dd>{{ company.website_checked_at.strftime('%Y-%m-%d %H:%M') if company.website_checked_at else "-" }}</dd>
     <dt>Created</dt><dd>{{ company.created_at.strftime('%Y-%m-%d') }}</dd>
     <dt>Updated</dt><dd>{{ company.updated_at.strftime('%Y-%m-%d') }}</dd>

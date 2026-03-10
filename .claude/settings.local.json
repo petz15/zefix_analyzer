@@ -13,7 +13,9 @@
       "WebFetch(domain:jupyter.zazuko.com)",
       "WebFetch(domain:packagist.org)",
       "WebFetch(domain:www.drupal.org)",
-      "WebFetch(domain:amtsblattportal.ch)"
+      "WebFetch(domain:amtsblattportal.ch)",
+      "Bash(python -m alembic upgrade head)",
+      "Bash(python -c \"from app.models.company import Company; from app.schemas.company import CompanyBase, CompanyUpdate; from app.services.collection import _extract_company_fields; print\\(''OK''\\)\")"
     ]
   }
 }

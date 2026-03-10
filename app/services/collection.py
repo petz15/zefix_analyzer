@@ -13,9 +13,11 @@ from app.api.google_search_client import search_website
 from app.config import settings
 from app.api.zefix_client import (
     ALPHABET,
+    ALPHANUMERIC,
     SWISS_CANTONS,
     ZEFIX_MAX_ENTRIES,
     _normalise_uid,
+    _parse_legal_form,
     fetch_companies_by_prefix,
     get_company as zefix_get_company,
     search_companies,
@@ -63,37 +65,111 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
     else:
         name = str(name_raw)
 
-    legal_form_raw = raw.get("legalForm", {})
-    if isinstance(legal_form_raw, dict):
-        legal_form = legal_form_raw.get("de") or legal_form_raw.get("shortName") or None
-    else:
-        legal_form = str(legal_form_raw) if legal_form_raw else None
+    legal_form_display, legal_form_id, legal_form_uid, legal_form_short = _parse_legal_form(
+        raw.get("legalForm")
+    )
 
     address_parts = raw.get("address", {}) or {}
     address_str: str | None = None
     if isinstance(address_parts, dict):
-        parts = [
-            address_parts.get("street"),
-            address_parts.get("houseNumber"),
-            address_parts.get("swissZipCode"),
-            address_parts.get("city"),
-        ]
-        address_str = " ".join(str(p) for p in parts if p) or None
+        a_parts: list[str] = []
+        org = address_parts.get("organisation") or ""
+        care_of = address_parts.get("careOf") or ""
+        street = address_parts.get("street") or ""
+        house_num = address_parts.get("houseNumber") or ""
+        addon = address_parts.get("addon") or ""
+        po_box = address_parts.get("poBox") or ""
+        city = address_parts.get("city") or ""
+        zip_code = address_parts.get("swissZipCode") or ""
+        if org:
+            a_parts.append(org)
+        if care_of:
+            a_parts.append(f"c/o {care_of}")
+        street_line = f"{street} {house_num}".strip()
+        if street_line:
+            a_parts.append(street_line)
+        if addon:
+            a_parts.append(addon)
+        if po_box:
+            a_parts.append(f"Postfach {po_box}")
+        zip_city = f"{zip_code} {city}".strip()
+        if zip_city:
+            a_parts.append(zip_city)
+        address_str = ", ".join(a_parts) or None
 
     uid_normalised = _normalise_uid(str(raw.get("uid", fallback_uid)))
 
     purpose = raw.get("purpose") or None
 
+    ehraid_raw = raw.get("ehraId") or raw.get("ehraid") or raw.get("ehra_id")
+    ehraid = str(ehraid_raw) if ehraid_raw is not None else None
+
+    chid_raw = raw.get("chid")
+    chid = str(chid_raw) if chid_raw is not None else None
+
+    legal_seat_id_raw = raw.get("legalSeatId") or raw.get("legal_seat_id")
+    legal_seat_id: int | None = None
+    if legal_seat_id_raw is not None:
+        try:
+            legal_seat_id = int(legal_seat_id_raw)
+        except (ValueError, TypeError):
+            pass
+
+    sogc_date_raw = raw.get("sogcDate") or raw.get("sogc_date")
+    sogc_date = str(sogc_date_raw) if sogc_date_raw else None
+
+    deletion_date_raw = raw.get("deletionDate") or raw.get("deletion_date")
+    deletion_date = str(deletion_date_raw) if deletion_date_raw else None
+
+    # Extended detail fields
+    def _json_field(val: Any) -> str | None:
+        return json.dumps(val) if val is not None else None
+
+    sogc_pub_raw = raw.get("sogcPub")
+    sogc_pub = _json_field(sogc_pub_raw)
+
+    capital_nominal_raw = raw.get("capitalNominal")
+    capital_nominal = str(capital_nominal_raw) if capital_nominal_raw is not None else None
+    capital_currency = raw.get("capitalCurrency") or None
+
+    head_offices = _json_field(raw.get("headOffices"))
+    further_head_offices = _json_field(raw.get("furtherHeadOffices"))
+    branch_offices = _json_field(raw.get("branchOffices"))
+    has_taken_over = _json_field(raw.get("hasTakenOver"))
+    was_taken_over_by = _json_field(raw.get("wasTakenOverBy"))
+    audit_companies = _json_field(raw.get("auditCompanies"))
+    old_names = _json_field(raw.get("oldNames"))
+    cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
+
     return CompanyCreate(
         uid=uid_normalised,
         name=name,
-        legal_form=legal_form,
+        legal_form=legal_form_display,
+        legal_form_id=legal_form_id,
+        legal_form_uid=legal_form_uid,
+        legal_form_short_name=legal_form_short,
         status=str(raw.get("status", "")) or None,
-        municipality=raw.get("municipality") or None,
+        municipality=raw.get("municipality") or raw.get("legalSeat") or None,
         canton=raw.get("canton") or None,
         purpose=purpose,
         address=address_str,
         industry=_derive_industry(purpose),
+        ehraid=ehraid,
+        chid=chid,
+        legal_seat_id=legal_seat_id,
+        sogc_date=sogc_date,
+        deletion_date=deletion_date,
+        sogc_pub=sogc_pub,
+        capital_nominal=capital_nominal,
+        capital_currency=capital_currency,
+        head_offices=head_offices,
+        further_head_offices=further_head_offices,
+        branch_offices=branch_offices,
+        has_taken_over=has_taken_over,
+        was_taken_over_by=was_taken_over_by,
+        audit_companies=audit_companies,
+        old_names=old_names,
+        cantonal_excerpt_web=cantonal_excerpt_web,
         zefix_raw=json.dumps(raw),
     )
 
@@ -240,18 +316,19 @@ def _fetch_prefix_with_fallback(
     prefix: str,
     active_only: bool,
     request_delay: float,
+    _depth: int = 0,
 ) -> list[Any]:
-    """Return all companies for *prefix*, expanding to double-letter prefixes if needed.
+    """Return all companies for *prefix*, expanding to longer prefixes when the cap is hit.
 
-    Triggers double-letter expansion in two cases:
-    - The single-letter query returns exactly ZEFIX_MAX_ENTRIES (API truncated).
-    - The single-letter query returns HTTP 400 (Zefix rejects queries that would
-      return too many results).
+    Expands up to three levels deep (single → double → triple letter/digit prefix).
+    Expansion is triggered when:
+    - The query returns exactly ZEFIX_MAX_ENTRIES results (API truncated), or
+    - The query returns HTTP 400 (Zefix rejects oversized result sets).
 
-    In both cases every two-letter sub-prefix (e.g. "Aa"…"Az") is queried and
-    results are deduplicated by UID.  If a two-letter prefix still hits the cap
-    or returns 400 it is skipped (not expanded further).
+    Results across all sub-prefixes are deduplicated by UID.
     """
+    _MAX_DEPTH = 2  # 0 = single, 1 = double, 2 = triple
+
     expand = False
     results: list[Any] = []
     try:
@@ -267,14 +344,20 @@ def _fetch_prefix_with_fallback(
     if not expand:
         return results
 
-    # Cap hit or 400 — expand to double-letter sub-prefixes
+    if _depth >= _MAX_DEPTH:
+        # Cannot expand further — return what we have (may be partial)
+        return results
+
+    # Expand to next-level sub-prefixes using full alphanumeric set
     seen: set[str] = set()
     expanded: list[Any] = []
 
-    for letter in ALPHABET:
-        sub_prefix = prefix + letter
+    for char in ALPHANUMERIC:
+        sub_prefix = prefix + char
         try:
-            sub_results = fetch_companies_by_prefix(sub_prefix, canton, active_only=active_only)
+            sub_results = _fetch_prefix_with_fallback(
+                canton, sub_prefix, active_only, request_delay, _depth + 1
+            )
         except Exception:  # noqa: BLE001
             continue
         for r in sub_results:
@@ -336,24 +419,31 @@ def bulk_import_zefix(
     stats: dict[str, Any] = {
         "cantons_done": existing_stats.get("cantons_done", 0),
         "created": existing_stats.get("created", 0),
-        "skipped": existing_stats.get("skipped", 0),
+        "updated": existing_stats.get("updated", 0),
         "errors": existing_stats.get("errors", []),
+    }
+
+    # Fields that come exclusively from Zefix — safe to overwrite on every run
+    _ZEFIX_UPDATE_FIELDS = {
+        "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
+        "status", "municipality", "canton", "purpose", "industry",
+        "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     }
 
     # ── Main sweep ───────────────────────────────────────────────────────────
     for canton in target_cantons[start_canton_idx:]:
         prefix_start = start_prefix_idx if canton == target_cantons[start_canton_idx] else 0
 
-        for prefix_idx, letter in enumerate(ALPHABET):
+        for prefix_idx, char in enumerate(ALPHANUMERIC):
             if prefix_idx < prefix_start:
                 continue
 
             try:
                 results = _fetch_prefix_with_fallback(
-                    canton, letter, active_only=active_only, request_delay=request_delay
+                    canton, char, active_only=active_only, request_delay=request_delay
                 )
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Canton {canton} prefix {letter}: {exc}")
+                stats["errors"].append(f"Canton {canton} prefix {char}: {exc}")
                 crud.update_checkpoint(db, run, canton, prefix_idx, stats)
                 time.sleep(request_delay)
                 continue
@@ -361,29 +451,41 @@ def bulk_import_zefix(
             for result in results:
                 if not result.uid:
                     continue
-                if crud.get_company_by_uid(db, result.uid):
-                    stats["skipped"] += 1
+                company_data = CompanyCreate(
+                    uid=result.uid,
+                    name=result.name,
+                    legal_form=result.legal_form,
+                    legal_form_id=result.legal_form_id,
+                    legal_form_uid=result.legal_form_uid,
+                    legal_form_short_name=result.legal_form_short_name,
+                    status=result.status,
+                    municipality=result.municipality,
+                    canton=result.canton or canton,  # search was canton-scoped, so always known
+                    purpose=result.purpose,
+                    industry=_derive_industry(result.purpose),
+                    ehraid=result.ehraid,
+                    chid=result.chid,
+                    legal_seat_id=result.legal_seat_id,
+                    sogc_date=result.sogc_date,
+                    deletion_date=result.deletion_date,
+                )
+                existing = crud.get_company_by_uid(db, result.uid)
+                if existing:
+                    update_payload = {
+                        k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
+                        if k in _ZEFIX_UPDATE_FIELDS
+                    }
+                    crud.update_company(db, existing, CompanyUpdate(**update_payload))
+                    stats["updated"] += 1
                 else:
-                    crud.create_company(
-                        db,
-                        CompanyCreate(
-                            uid=result.uid,
-                            name=result.name,
-                            legal_form=result.legal_form,
-                            status=result.status,
-                            municipality=result.municipality,
-                            canton=result.canton,
-                            purpose=result.purpose,
-                            industry=_derive_industry(result.purpose),
-                        ),
-                    )
+                    crud.create_company(db, company_data)
                     stats["created"] += 1
 
-            # Checkpoint: last_offset = prefix index (0–25)
+            # Checkpoint: last_offset = prefix index (0–35 for 0-9 + A-Z)
             crud.update_checkpoint(db, run, canton, prefix_idx, stats)
 
             if progress_cb:
-                progress_cb(canton, letter, stats["created"], stats["skipped"])
+                progress_cb(canton, char, stats["created"], stats["updated"])
 
             time.sleep(request_delay)
 
