@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% if has_active %}
+{% block extra_head %}<meta http-equiv="refresh" content="3">{% endblock %}
+{% endif %}
+
+{% block content %}
+<section class="card">
+  <div class="stack-header">
+    <h2 style="margin:0;">Background Jobs</h2>
+    <a class="button-link secondary" href="/ui/collection">Start jobs</a>
+  </div>
+
+  {% if jobs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Label</th>
+          <th>Message</th>
+          <th>Actions</th>
+          <th>Progress</th>
+          <th>Queued</th>
+          <th>Started</th>
+          <th>Completed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.id }}</td>
+          <td>{{ j.job_type }}</td>
+          <td>
+            <span class="badge-sm {% if j.status == 'completed' %}badge-green{% elif j.status == 'failed' %}badge-red{% elif j.status == 'running' %}badge-blue{% else %}badge-gray{% endif %}">
+              {{ j.status }}
+            </span>
+          </td>
+          <td>{{ j.label }}</td>
+          <td>
+            {{ j.message or "-" }}
+            {% if j.error %}
+            <details style="margin-top:0.35rem;">
+              <summary style="cursor:pointer; color:var(--danger); font-size:0.84rem;">Show error</summary>
+              <pre style="max-height:8rem; margin-top:0.4rem;">{{ j.error }}</pre>
+            </details>
+            {% endif %}
+            {% if events_by_job.get(j.id) %}
+            <details style="margin-top:0.35rem;">
+              <summary style="cursor:pointer; font-size:0.84rem;">Event stream</summary>
+              <ul style="margin:0.45rem 0 0; padding-left:1.2rem; font-size:0.82rem;">
+                {% for ev in events_by_job.get(j.id) %}
+                <li>
+                  [{{ ev.created_at.strftime('%H:%M:%S') if ev.created_at else '-' }}]
+                  {{ ev.level }}: {{ ev.message }}
+                </li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% endif %}
+          </td>
+          <td>
+            {% if j.status in ['queued', 'running'] %}
+            <form method="post" action="/ui/jobs/{{ j.id }}/cancel" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+              <button type="submit" class="danger small">Cancel</button>
+            </form>
+            {% else %}
+            <span class="muted">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if j.progress_done is not none and j.progress_total is not none %}
+              {{ j.progress_done }}/{{ j.progress_total }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ j.queued_at.strftime('%Y-%m-%d %H:%M:%S') if j.queued_at else '-' }}</td>
+          <td>{{ j.started_at.strftime('%Y-%m-%d %H:%M:%S') if j.started_at else '-' }}</td>
+          <td>{{ j.completed_at.strftime('%Y-%m-%d %H:%M:%S') if j.completed_at else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted-hint">No jobs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -60,6 +60,8 @@ class Company(Base):
     cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Priority/lead score derived from Zefix data alone (0-100)
     zefix_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # JSON object with component-level zefix scoring contributions
+    zefix_score_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Geocoded coordinates (from Nominatim, based on the Zefix address)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)

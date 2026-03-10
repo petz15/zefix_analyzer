@@ -1,6 +1,53 @@
 {% extends "base.html" %}
 
+{% if active_task and scoring_task and not scoring_task.done %}
+{% block extra_head %}<meta http-equiv="refresh" content="3">{% endblock %}
+{% endif %}
+
 {% block content %}
+{% if scoring_task and not scoring_task.done %}
+<section class="card" style="margin-bottom: 1rem;">
+  <div style="display:flex; align-items:center; gap:0.8rem;">
+    <span class="spinner"></span>
+    <div>
+      <p style="margin:0; font-weight:600;">{{ scoring_task.label }}</p>
+      <p style="margin:0.2rem 0 0; color:var(--muted);">{{ scoring_task.message }}</p>
+      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes every 3 s</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if scoring_task and scoring_task.done %}
+  {% if scoring_task.error %}
+  <section class="card" style="margin-bottom: 1rem; border-color: var(--danger);">
+    <p style="margin:0; font-weight:600; color:var(--danger);">{{ scoring_task.label }} failed</p>
+    <p style="margin:0.35rem 0 0; color:var(--error-ink);">{{ scoring_task.error }}</p>
+  </section>
+  {% else %}
+  <section class="card" style="margin-bottom: 1rem; border-color: var(--accent-2);">
+    <p style="margin:0; font-weight:600; color:var(--accent-2);">{{ scoring_task.label }} complete</p>
+    <p style="margin:0.35rem 0 0; color:var(--muted);">{{ scoring_task.message }}</p>
+    <p style="margin:0.35rem 0 0; font-size:0.88rem; color:var(--muted);">
+      Updated: {{ scoring_task.stats.get("updated", 0) }} companies
+      {% if scoring_task.stats.get("errors") %}
+      &nbsp;·&nbsp; Errors: {{ scoring_task.stats.errors | length }}
+      {% endif %}
+    </p>
+    {% if scoring_task.stats.get("errors") %}
+      <details style="margin-top:0.55rem;">
+        <summary style="cursor:pointer; color:var(--danger); font-size:0.88rem;">Show errors</summary>
+        <ul style="margin:0.45rem 0 0; padding-left:1.2rem; font-size:0.84rem;">
+          {% for e in scoring_task.stats.errors %}
+          <li>{{ e }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  </section>
+  {% endif %}
+{% endif %}
+
 <section class="card" style="max-width: 540px;">
   <h2>Settings</h2>
 
@@ -23,10 +70,43 @@
         <small class="muted">Free tier = 100/day. Batch runs stop automatically when this limit is reached.</small>
       </label>
 
+      <label class="form-label">
+        <span>Zefix score: Industry bonus</span>
+        <input type="number" name="zefix_industry_bonus" value="{{ zefix_industry_bonus }}" min="-100" max="100">
+        <small class="muted">Points added when an industry is detected.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Treuhand/Consulting penalty</span>
+        <input type="number" name="zefix_treuhand_consulting_penalty" value="{{ zefix_treuhand_consulting_penalty }}" min="0" max="100">
+        <small class="muted">Points subtracted for industries containing "treuhand" or "consulting".</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Inactive status penalty</span>
+        <input type="number" name="zefix_inactive_status_penalty" value="{{ zefix_inactive_status_penalty }}" min="0" max="100">
+        <small class="muted">Penalty for statuses not recognized as active.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Force-zero status terms</span>
+        <input type="text" name="zefix_force_zero_status_terms" value="{{ zefix_force_zero_status_terms }}" placeholder="being_cancelled, dissolved">
+        <small class="muted">Comma-separated normalized terms. If status contains one term, score is forced to 0.</small>
+      </label>
+
     </div>
 
     <button type="submit">Save settings</button>
     <a class="button-link secondary" href="/ui" style="margin-left: 0.5rem;">Cancel</a>
+  </form>
+
+  <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
+
+  <form method="post" action="/ui/scoring/recalculate">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Recompute all saved <code>zefix_score</code> values after you change the scoring algorithm.
+    </p>
+    <button type="submit" {% if active_task %}disabled{% endif %}>Recalculate Zefix scores</button>
   </form>
 </section>
 {% endblock %}

@@ -19,9 +19,11 @@ from app.services.collection import (
     geocode_and_update_company,
     import_company_from_zefix_uid,
     initial_collect,
+    recalculate_zefix_scores,
     run_batch_collect,
     run_zefix_detail_collect,
 )
+from app.services.scoring import get_default_scoring_config
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
 
@@ -30,6 +32,10 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["tojson_parse"] = lambda s: json.loads(s) if s else {}
 
 PAGE_SIZE = 50
+
+
+class JobCancelledError(Exception):
+    """Raised when a running job receives a cancellation request."""
 
 
 def _filter_params(
@@ -96,6 +102,7 @@ def ui_home(
     error: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    _ensure_job_worker(request.app)
     min_score_int: int | None = int(min_score) if min_score and min_score.strip().lstrip("-").isdigit() else None
     searched_filter = _searched_bool(google_searched)
     filter_kwargs = dict(
@@ -284,6 +291,15 @@ def ui_company_detail(
         except Exception:  # noqa: BLE001
             pass
 
+    zefix_score_breakdown: dict | None = None
+    if company.zefix_score_breakdown:
+        try:
+            parsed = json.loads(company.zefix_score_breakdown)
+            if isinstance(parsed, dict):
+                zefix_score_breakdown = parsed
+        except Exception:  # noqa: BLE001
+            pass
+
     return templates.TemplateResponse(
         "company_detail.html",
         {
@@ -294,6 +310,7 @@ def ui_company_detail(
             "google_results": google_results,
             "old_names": old_names,
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
+            "zefix_score_breakdown": zefix_score_breakdown,
             "message": message,
             "error": error,
         },
@@ -484,15 +501,51 @@ def ui_settings(
     error: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    _ensure_job_worker(request.app)
     current = crud.get_all_settings(db)
+
+    task = getattr(request.app.state, "collection_task", None)
+    active_jobs = crud.list_active_jobs(db)
+    latest_scoring_job = next((j for j in crud.list_jobs(db, limit=50) if j.job_type == "recalculate_scores"), None)
+
+    scoring_task = None
+    if latest_scoring_job is not None:
+        scoring_stats = json.loads(latest_scoring_job.stats_json or "{}") if latest_scoring_job.stats_json else {}
+        scoring_task = {
+            "type": latest_scoring_job.job_type,
+            "label": latest_scoring_job.label,
+            "message": latest_scoring_job.message or "",
+            "stats": scoring_stats,
+            "error": latest_scoring_job.error,
+            "done": latest_scoring_job.status in ("completed", "failed", "cancelled"),
+        }
+
+    active_task = task if _task_is_running(request.app.state) else None
+    if active_task is None and active_jobs:
+        j = active_jobs[0]
+        active_task = {
+            "type": j.job_type,
+            "label": j.label,
+            "message": j.message or j.status,
+            "stats": json.loads(j.stats_json or "{}") if j.stats_json else {},
+            "error": j.error,
+            "done": False,
+        }
+
     return templates.TemplateResponse(
         "settings.html",
         {
             "request": request,
             "google_search_enabled": current.get("google_search_enabled", "true") == "true",
             "google_daily_quota": current.get("google_daily_quota", "100"),
+            "zefix_industry_bonus": current.get("zefix_industry_bonus", "15"),
+            "zefix_treuhand_consulting_penalty": current.get("zefix_treuhand_consulting_penalty", "15"),
+            "zefix_inactive_status_penalty": current.get("zefix_inactive_status_penalty", "40"),
+            "zefix_force_zero_status_terms": current.get("zefix_force_zero_status_terms", "being_cancelled"),
             "message": message,
             "error": error,
+            "active_task": active_task,
+            "scoring_task": scoring_task,
         },
     )
 
@@ -501,13 +554,46 @@ def ui_settings(
 def save_settings(
     google_search_enabled: str = Form("false"),
     google_daily_quota: str = Form("100"),
+    zefix_industry_bonus: str = Form("15"),
+    zefix_treuhand_consulting_penalty: str = Form("15"),
+    zefix_inactive_status_penalty: str = Form("40"),
+    zefix_force_zero_status_terms: str = Form("being_cancelled"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     crud.set_setting(db, "google_search_enabled", "true" if google_search_enabled == "true" else "false")
     quota = max(1, int(google_daily_quota)) if google_daily_quota.isdigit() else 100
     crud.set_setting(db, "google_daily_quota", str(quota))
+
+    defaults = get_default_scoring_config()
+    score_fields = {
+        "zefix_industry_bonus": zefix_industry_bonus,
+        "zefix_treuhand_consulting_penalty": zefix_treuhand_consulting_penalty,
+        "zefix_inactive_status_penalty": zefix_inactive_status_penalty,
+        "zefix_force_zero_status_terms": zefix_force_zero_status_terms,
+    }
+    for key, value in score_fields.items():
+        if key == "zefix_force_zero_status_terms":
+            cleaned = value.strip() or defaults[key]
+        else:
+            cleaned = str(int(value)) if value.strip().lstrip("-").isdigit() else defaults[key]
+        crud.set_setting(db, key, cleaned)
+
     return RedirectResponse(
         url=f"/ui/settings?message={quote_plus('Settings saved')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/ui/scoring/recalculate", include_in_schema=False)
+def start_recalculate_scores(request: Request) -> RedirectResponse:
+    job = _enqueue_job(
+        request,
+        job_type="recalculate_scores",
+        label="Recalculate Zefix scoring",
+        params={},
+    )
+    return RedirectResponse(
+        url=f"/ui/settings?message={quote_plus(f'Scoring recalculation queued (job #{job.id})')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -519,6 +605,245 @@ def _task_is_running(app_state) -> bool:
     return task is not None and not task.get("done", False)
 
 
+def _sync_active_task(app_state, *, job_type: str, label: str, message: str, stats: dict, error: str | None, done: bool) -> None:
+    app_state.collection_task = {
+        "type": job_type,
+        "label": label,
+        "started_at": time.time(),
+        "message": message,
+        "stats": stats,
+        "error": error,
+        "done": done,
+    }
+
+
+def _run_job(app, job_id: int) -> None:
+    with SessionLocal() as db:
+        job = crud.get_job(db, job_id)
+        if not job:
+            return
+
+        if job.status == "cancelled" or job.cancel_requested:
+            crud.mark_cancelled(db, job, message="Cancelled before start")
+            crud.create_event(db, job_id=job.id, level="info", message="Job cancelled before execution started")
+            return
+
+        crud.mark_running(db, job, message="Starting…")
+        crud.create_event(db, job_id=job.id, level="info", message="Job started")
+        _sync_active_task(
+            app.state,
+            job_type=job.job_type,
+            label=job.label,
+            message="Starting…",
+            stats={},
+            error=None,
+            done=False,
+        )
+
+        params = json.loads(job.params_json or "{}")
+
+        def _assert_not_cancelled() -> None:
+            db.refresh(job)
+            if job.cancel_requested:
+                raise JobCancelledError("Cancellation requested")
+
+        try:
+            if job.job_type == "recalculate_scores":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Recalculated {done}/{total} companies"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = recalculate_zefix_scores(db, progress_cb=_progress)
+                done_msg = f"Done — {stats['updated']} companies recalculated, {len(stats['errors'])} errors"
+
+            elif job.job_type == "bulk":
+                def _progress(canton: str, prefix: str, created: int, updated: int) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Canton {canton} prefix {prefix} — {created} created, {updated} updated"
+                    stats_now = {"created": created, "updated": updated}
+                    crud.update_progress(db, job, message=msg, stats=stats_now)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
+
+                stats = bulk_import_zefix(
+                    db,
+                    cantons=params.get("cantons"),
+                    active_only=params.get("active_only", True),
+                    request_delay=float(params.get("delay", 0.5)),
+                    resume=params.get("resume", False),
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['created']} created, {stats['updated']} updated, {len(stats['errors'])} errors"
+
+            elif job.job_type == "batch":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Processing {done}/{total} companies"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = run_batch_collect(
+                    db,
+                    limit=int(params.get("limit", 100)),
+                    skip=int(params.get("skip", 0)),
+                    only_missing_website=bool(params.get("only_missing_website", True)),
+                    refresh_zefix=bool(params.get("refresh_zefix", False)),
+                    run_google=bool(params.get("run_google", True)),
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats['google_enriched']} enriched, "
+                    f"{stats['google_no_result']} no result, {len(stats['errors'])} errors"
+                )
+
+            elif job.job_type == "initial":
+                def _progress(stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Collected {stats.get('created', 0)} created, "
+                        f"{stats.get('updated', 0)} updated"
+                    )
+                    crud.update_progress(db, job, message=msg, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = initial_collect(
+                    db,
+                    names=params.get("names", []),
+                    uids=params.get("uids", []),
+                    canton=params.get("canton"),
+                    legal_form=params.get("legal_form"),
+                    active_only=bool(params.get("active_only", True)),
+                    run_google=bool(params.get("run_google", True)),
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats['created']} created, {stats['updated']} updated, "
+                    f"{stats['google_enriched']} enriched, {len(stats['errors'])} errors"
+                )
+
+            elif job.job_type == "detail":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Processing {done}/{total}"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = run_zefix_detail_collect(
+                    db,
+                    cantons=params.get("cantons"),
+                    uids=params.get("uids"),
+                    score_if_missing=bool(params.get("score_if_missing", True)),
+                    request_delay=float(params.get("delay", 0.3)),
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {len(stats['errors'])} errors"
+            else:
+                raise RuntimeError(f"Unsupported job type: {job.job_type}")
+
+            crud.mark_completed(db, job, message=done_msg, stats=stats)
+            crud.create_event(db, job_id=job.id, level="info", message=done_msg)
+            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
+        except JobCancelledError:
+            msg = "Cancelled by user"
+            crud.mark_cancelled(db, job, message=msg)
+            crud.create_event(db, job_id=job.id, level="warn", message=msg)
+            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
+            crud.mark_failed(db, job, error=err)
+            crud.create_event(db, job_id=job.id, level="error", message=err)
+            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)
+
+
+def _job_worker_loop(app) -> None:
+    app.state.job_worker_running = True
+    try:
+        while True:
+            with SessionLocal() as db:
+                next_job = crud.get_next_queued_job(db)
+                if next_job is None:
+                    break
+                next_id = next_job.id
+            _run_job(app, next_id)
+    finally:
+        app.state.job_worker_running = False
+        with SessionLocal() as db:
+            if crud.get_next_queued_job(db) is not None:
+                _ensure_job_worker(app)
+
+
+def _ensure_job_worker(app) -> None:
+    if getattr(app.state, "job_worker_running", False):
+        return
+    threading.Thread(target=_job_worker_loop, args=(app,), daemon=True).start()
+
+
+def _enqueue_job(request: Request, *, job_type: str, label: str, params: dict) -> object:
+    with SessionLocal() as db:
+        job = crud.create_job(db, job_type=job_type, label=label, params=params)
+        crud.create_event(db, job_id=job.id, level="info", message="Job queued")
+    _ensure_job_worker(request.app)
+    return job
+
+
+@router.get("/ui/jobs", response_class=HTMLResponse, include_in_schema=False)
+def ui_jobs(
+    request: Request,
+    message: str | None = Query(None),
+    error: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    _ensure_job_worker(request.app)
+    jobs = crud.list_jobs(db, limit=100)
+    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=20) for j in jobs}
+    has_active = any(j.status in ("queued", "running") for j in jobs)
+    return templates.TemplateResponse(
+        "jobs.html",
+        {
+            "request": request,
+            "jobs": jobs,
+            "events_by_job": events_by_job,
+            "has_active": has_active,
+            "message": message,
+            "error": error,
+        },
+    )
+
+
+@router.post("/ui/jobs/{job_id}/cancel", include_in_schema=False)
+def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    job = crud.get_job(db, job_id)
+    if not job:
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if job.status == "queued":
+        crud.mark_cancelled(db, job, message="Cancelled before execution")
+        crud.create_event(db, job_id=job.id, level="warn", message="Job cancelled before execution")
+    elif job.status == "running":
+        crud.mark_cancel_requested(db, job)
+        crud.create_event(db, job_id=job.id, level="warn", message="Cancellation requested")
+    else:
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Only queued or running jobs can be cancelled')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    _ensure_job_worker(request.app)
+    return RedirectResponse(
+        url=f"/ui/jobs?message={quote_plus(f'Cancellation requested for job #{job_id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/ui/collection", response_class=HTMLResponse, include_in_schema=False)
 def ui_collection(
     request: Request,
@@ -526,9 +851,11 @@ def ui_collection(
     error: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    _ensure_job_worker(request.app)
     task = getattr(request.app.state, "collection_task", None)
     incomplete_bulk = crud.get_last_incomplete_bulk(db)
     runs = crud.list_runs(db, limit=20)
+    jobs = crud.list_jobs(db, limit=20)
     return templates.TemplateResponse(
         "collection.html",
         {
@@ -537,6 +864,7 @@ def ui_collection(
             "cantons": SWISS_CANTONS,
             "incomplete_bulk": incomplete_bulk,
             "runs": runs,
+            "jobs": jobs,
             "message": message,
             "error": error,
         },
@@ -551,53 +879,23 @@ async def start_bulk(
     include_inactive: str = Form("false"),
     resume: str = Form("false"),
 ) -> RedirectResponse:
-    if _task_is_running(request.app.state):
-        return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
     canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
-
-    task: dict = {
-        "type": "bulk",
-        "label": f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}",
-        "started_at": time.time(),
-        "message": "Starting…",
-        "stats": {},
-        "error": None,
-        "done": False,
-    }
-    request.app.state.collection_task = task
-
-    def _run() -> None:
-        def progress_cb(canton: str, prefix: str, created: int, updated: int) -> None:
-            task["message"] = f"Canton {canton} prefix {prefix} — {created} created, {updated} updated"
-            task["stats"] = {"created": created, "updated": updated}
-
-        try:
-            with SessionLocal() as db:
-                stats = bulk_import_zefix(
-                    db,
-                    cantons=canton_list,
-                    active_only=include_inactive != "true",
-                    request_delay=delay,
-                    resume=resume == "true",
-                    progress_cb=progress_cb,
-                )
-            task["stats"] = stats
-            task["message"] = (
-                f"Done — {stats['created']} created, {stats['updated']} updated, "
-                f"{len(stats['errors'])} errors"
-            )
-        except Exception as exc:  # noqa: BLE001
-            task["error"] = str(exc)
-            task["message"] = "Failed"
-        finally:
-            task["done"] = True
-
-    threading.Thread(target=_run, daemon=True).start()
-    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+    label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
+    job = _enqueue_job(
+        request,
+        job_type="bulk",
+        label=label,
+        params={
+            "cantons": canton_list,
+            "active_only": include_inactive != "true",
+            "delay": delay,
+            "resume": resume == "true",
+        },
+    )
+    return RedirectResponse(
+        url=f"/ui/collection?message={quote_plus(f'Queued bulk job #{job.id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/ui/collection/batch", include_in_schema=False)
@@ -609,53 +907,22 @@ async def start_batch(
     refresh_zefix: str = Form("false"),
     skip_google: str = Form("false"),
 ) -> RedirectResponse:
-    if _task_is_running(request.app.state):
-        return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
-    task: dict = {
-        "type": "batch",
-        "label": f"Batch enrichment — up to {limit} companies",
-        "started_at": time.time(),
-        "message": "Starting…",
-        "stats": {},
-        "error": None,
-        "done": False,
-    }
-    request.app.state.collection_task = task
-
-    def _run() -> None:
-        def progress_cb(done: int, total: int, stats: dict) -> None:
-            task["message"] = f"Processing {done}/{total} companies"
-            task["stats"] = dict(stats)
-
-        try:
-            with SessionLocal() as db:
-                stats = run_batch_collect(
-                    db,
-                    limit=limit,
-                    skip=skip,
-                    only_missing_website=all_companies != "true",
-                    refresh_zefix=refresh_zefix == "true",
-                    run_google=skip_google != "true",
-                    progress_cb=progress_cb,
-                )
-            task["stats"] = stats
-            task["message"] = (
-                f"Done — {stats['google_enriched']} enriched, "
-                f"{stats['google_no_result']} no result, "
-                f"{len(stats['errors'])} errors"
-            )
-        except Exception as exc:  # noqa: BLE001
-            task["error"] = str(exc)
-            task["message"] = "Failed"
-        finally:
-            task["done"] = True
-
-    threading.Thread(target=_run, daemon=True).start()
-    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+    job = _enqueue_job(
+        request,
+        job_type="batch",
+        label=f"Batch enrichment — up to {limit} companies",
+        params={
+            "limit": limit,
+            "skip": skip,
+            "only_missing_website": all_companies != "true",
+            "refresh_zefix": refresh_zefix == "true",
+            "run_google": skip_google != "true",
+        },
+    )
+    return RedirectResponse(
+        url=f"/ui/collection?message={quote_plus(f'Queued batch job #{job.id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/ui/collection/initial", include_in_schema=False)
@@ -668,12 +935,6 @@ async def start_initial(
     include_inactive: str = Form("false"),
     skip_google: str = Form("false"),
 ) -> RedirectResponse:
-    if _task_is_running(request.app.state):
-        return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
     name_list = [n.strip() for n in names.splitlines() if n.strip()]
     uid_list = [u.strip() for u in uids.splitlines() if u.strip()]
 
@@ -683,44 +944,23 @@ async def start_initial(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    task: dict = {
-        "type": "initial",
-        "label": (
-            f"Specific search — {len(name_list)} name(s), {len(uid_list)} UID(s)"
-        ),
-        "started_at": time.time(),
-        "message": "Starting…",
-        "stats": {},
-        "error": None,
-        "done": False,
-    }
-    request.app.state.collection_task = task
-
-    def _run() -> None:
-        try:
-            with SessionLocal() as db:
-                stats = initial_collect(
-                    db,
-                    names=name_list,
-                    uids=uid_list,
-                    canton=canton.strip().upper() or None,
-                    legal_form=legal_form.strip() or None,
-                    active_only=include_inactive != "true",
-                    run_google=skip_google != "true",
-                )
-            task["stats"] = stats
-            task["message"] = (
-                f"Done — {stats['created']} created, {stats['updated']} updated, "
-                f"{stats['google_enriched']} enriched, {len(stats['errors'])} errors"
-            )
-        except Exception as exc:  # noqa: BLE001
-            task["error"] = str(exc)
-            task["message"] = "Failed"
-        finally:
-            task["done"] = True
-
-    threading.Thread(target=_run, daemon=True).start()
-    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+    job = _enqueue_job(
+        request,
+        job_type="initial",
+        label=f"Specific search — {len(name_list)} name(s), {len(uid_list)} UID(s)",
+        params={
+            "names": name_list,
+            "uids": uid_list,
+            "canton": canton.strip().upper() or None,
+            "legal_form": legal_form.strip() or None,
+            "active_only": include_inactive != "true",
+            "run_google": skip_google != "true",
+        },
+    )
+    return RedirectResponse(
+        url=f"/ui/collection?message={quote_plus(f'Queued initial search job #{job.id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/ui/collection/detail", include_in_schema=False)
@@ -731,12 +971,6 @@ async def start_detail(
     score_if_missing: str = Form("true"),
     delay: float = Form(0.3),
 ) -> RedirectResponse:
-    if _task_is_running(request.app.state):
-        return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
     canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
     uid_list = [u.strip() for u in uids.splitlines() if u.strip()] or None
 
@@ -745,47 +979,23 @@ async def start_detail(
     elif uid_list:
         label = f"Zefix detail fetch — {len(uid_list)} UID(s)"
     else:
-        label = f"Zefix detail fetch — up to {limit} companies"
+        label = "Zefix detail fetch — all matching companies"
 
-    task: dict = {
-        "type": "detail",
-        "label": label,
-        "started_at": time.time(),
-        "message": "Starting…",
-        "stats": {},
-        "error": None,
-        "done": False,
-    }
-    request.app.state.collection_task = task
-
-    def _run() -> None:
-        def progress_cb(done: int, total: int, stats: dict) -> None:
-            task["message"] = f"Processing {done}/{total}"
-            task["stats"] = dict(stats)
-
-        try:
-            with SessionLocal() as db:
-                stats = run_zefix_detail_collect(
-                    db,
-                    cantons=canton_list,
-                    uids=uid_list,
-                    score_if_missing=score_if_missing == "true",
-                    request_delay=delay,
-                    progress_cb=progress_cb,
-                )
-            task["stats"] = stats
-            task["message"] = (
-                f"Done — {stats['updated']} updated, {stats['scored']} scored, "
-                f"{len(stats['errors'])} errors"
-            )
-        except Exception as exc:  # noqa: BLE001
-            task["error"] = str(exc)
-            task["message"] = "Failed"
-        finally:
-            task["done"] = True
-
-    threading.Thread(target=_run, daemon=True).start()
-    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+    job = _enqueue_job(
+        request,
+        job_type="detail",
+        label=label,
+        params={
+            "cantons": canton_list,
+            "uids": uid_list,
+            "score_if_missing": score_if_missing == "true",
+            "delay": delay,
+        },
+    )
+    return RedirectResponse(
+        url=f"/ui/collection?message={quote_plus(f'Queued detail job #{job.id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @router.post("/ui/collection/dismiss", include_in_schema=False)

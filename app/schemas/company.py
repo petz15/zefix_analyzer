@@ -48,6 +48,7 @@ class CompanyBase(BaseModel):
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
     zefix_score: int | None = None
+    zefix_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
 
@@ -103,6 +104,7 @@ class CompanyUpdate(BaseModel):
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
     zefix_score: int | None = None
+    zefix_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
 

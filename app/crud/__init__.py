@@ -18,6 +18,21 @@ from app.crud.company import (
     update_company,
 )
 from app.crud.note import create_note, delete_note, get_note, list_notes_for_company, update_note
+from app.crud.job_run import (
+    create_event,
+    create_job,
+    get_job,
+    get_next_queued_job,
+    list_active_jobs,
+    list_events,
+    list_jobs,
+    mark_cancel_requested,
+    mark_cancelled,
+    mark_completed,
+    mark_failed,
+    mark_running,
+    update_progress,
+)
 
 __all__ = [
     # company
@@ -47,4 +62,18 @@ __all__ = [
     "complete_run",
     "get_last_incomplete_bulk",
     "list_runs",
+    # job run
+    "create_job",
+    "get_job",
+    "get_next_queued_job",
+    "list_active_jobs",
+    "list_jobs",
+    "list_events",
+    "mark_running",
+    "mark_cancel_requested",
+    "mark_cancelled",
+    "update_progress",
+    "mark_completed",
+    "mark_failed",
+    "create_event",
 ]

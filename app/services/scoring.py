@@ -264,6 +264,129 @@ _LEGAL_FORM_SCORES: dict[str, int] = {
     "verein": 5, "association": 5,        # Associations — usually non-commercial
 }
 
+_DEFAULT_SCORING_CONFIG: dict[str, str] = {
+    "zefix_industry_bonus": "15",
+    "zefix_treuhand_consulting_penalty": "15",
+    "zefix_inactive_status_penalty": "40",
+    "zefix_force_zero_status_terms": "being_cancelled",
+}
+
+
+def get_default_scoring_config() -> dict[str, str]:
+    return dict(_DEFAULT_SCORING_CONFIG)
+
+
+def _cfg_int(config: dict[str, str] | None, key: str, fallback: int) -> int:
+    if not config:
+        return fallback
+    raw = config.get(key)
+    if raw is None:
+        return fallback
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _cfg_terms(config: dict[str, str] | None, key: str, fallback: list[str]) -> list[str]:
+    if not config:
+        return fallback
+    raw = (config.get(key) or "").strip()
+    if not raw:
+        return fallback
+    return [part.strip().lower().replace("-", "_").replace(" ", "_") for part in raw.split(",") if part.strip()]
+
+
+def compute_zefix_score_breakdown(
+    *,
+    legal_form: str | None,
+    legal_form_short_name: str | None,
+    capital_nominal: str | None,
+    purpose: str | None,
+    branch_offices: str | None,
+    industry: str | None,
+    status: str | None,
+    canton: str | None = None,
+    municipality: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    config: dict[str, str] | None = None,
+) -> dict:
+    industry_bonus = _cfg_int(config, "zefix_industry_bonus", 15)
+    consulting_penalty = _cfg_int(config, "zefix_treuhand_consulting_penalty", 15)
+    inactive_penalty = _cfg_int(config, "zefix_inactive_status_penalty", 40)
+    force_zero_terms = _cfg_terms(config, "zefix_force_zero_status_terms", ["being_cancelled"])
+
+    breakdown: dict[str, int | str | list[str] | bool] = {
+        "legal_form": 0,
+        "capital": 0,
+        "purpose": 0,
+        "branch_offices": 0,
+        "industry_bonus": 0,
+        "industry_penalty": 0,
+        "location": 0,
+        "status_penalty": 0,
+        "forced_zero": False,
+        "forced_zero_reason": "",
+        "force_zero_terms": force_zero_terms,
+    }
+
+    status_norm = (status or "").lower().replace("-", "_").replace(" ", "_")
+    if status_norm and any(term and term in status_norm for term in force_zero_terms):
+        breakdown["forced_zero"] = True
+        breakdown["forced_zero_reason"] = status or ""
+        breakdown["final_score"] = 0
+        return breakdown
+
+    lf_key = (legal_form_short_name or legal_form or "").lower().strip()
+    breakdown["legal_form"] = _LEGAL_FORM_SCORES.get(lf_key, 5)
+
+    if capital_nominal:
+        try:
+            cap = float(str(capital_nominal).replace("'", "").replace(",", "").replace(" ", ""))
+            if cap > 100_000:
+                breakdown["capital"] = 10
+            elif cap > 0:
+                breakdown["capital"] = 5
+        except (ValueError, TypeError):
+            breakdown["capital"] = 5
+
+    if purpose:
+        words = len(re.findall(r"\w+", purpose))
+        if words >= 20:
+            breakdown["purpose"] = 20
+        elif words >= 8:
+            breakdown["purpose"] = 5
+
+    if branch_offices and branch_offices not in ("null", "[]", ""):
+        breakdown["branch_offices"] = 10
+
+    if industry:
+        breakdown["industry_bonus"] = industry_bonus
+        ind = industry.lower()
+        if "treuhand" in ind or "consulting" in ind:
+            breakdown["industry_penalty"] = -consulting_penalty
+
+    breakdown["location"] = _location_score(canton, municipality, lat=lat, lon=lon)
+
+    if status:
+        st = status.lower()
+        if not any(word in st for word in ("aktiv", "active", "eingetragen", "inscrit", "iscritto")):
+            breakdown["status_penalty"] = -inactive_penalty
+
+    total = (
+        int(breakdown["legal_form"])
+        + int(breakdown["capital"])
+        + int(breakdown["purpose"])
+        + int(breakdown["branch_offices"])
+        + int(breakdown["industry_bonus"])
+        + int(breakdown["industry_penalty"])
+        + int(breakdown["location"])
+        + int(breakdown["status_penalty"])
+    )
+    breakdown["final_score"] = max(0, min(100, total))
+    return breakdown
+
 
 def compute_zefix_score(
     *,
@@ -278,62 +401,20 @@ def compute_zefix_score(
     municipality: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
+    config: dict[str, str] | None = None,
 ) -> int:
-    """Score a company based purely on Zefix data (0–100).
-
-    Used to prioritise which companies get Google-searched first (pre-search)
-    and as a secondary lead-quality signal alongside ``website_match_score``
-    (post-search).
-
-    Breakdown:
-      - Legal form relevance:    0–30 pts
-      - Capital nominal present: 0–10 pts  (>0 = 5, >100k = 10)
-      - Purpose richness:        0–20 pts  (length proxy for detail)
-      - Branch/head offices:     0–10 pts  (non-empty list)
-      - Industry detected:       0–15 pts
-      - Location (canton+dist):  variable  (nearby = up to +25, distant = down to −13)
-      - Status penalty:         −40 pts   if not clearly active
-    """
-    score = 0
-
-    # --- Legal form (0-30) ---
-    lf_key = (legal_form_short_name or legal_form or "").lower().strip()
-    score += _LEGAL_FORM_SCORES.get(lf_key, 5)  # 5 pts default for unknown forms
-
-    # --- Capital nominal (0-10) ---
-    if capital_nominal:
-        try:
-            cap = float(str(capital_nominal).replace("'", "").replace(",", "").replace(" ", ""))
-            if cap > 100_000:
-                score += 10
-            elif cap > 0:
-                score += 5
-        except (ValueError, TypeError):
-            score += 5  # present but unparseable — still a signal
-
-    # --- Purpose richness (0-20) ---
-    if purpose:
-        words = len(re.findall(r"\w+", purpose))
-        if words >= 20:
-            score += 20
-        elif words >= 8:
-            score += 5
-
-    # --- Branch offices present (0-10) ---
-    if branch_offices and branch_offices not in ("null", "[]", ""):
-        score += 10
-
-    # --- Industry detected (0-15) ---
-    if industry:
-        score += 15
-
-    # --- Location proximity to Muri bei Bern ---
-    score += _location_score(canton, municipality, lat=lat, lon=lon)
-
-    # --- Status penalty ---
-    if status:
-        st = status.lower()
-        if not any(word in st for word in ("aktiv", "active", "eingetragen", "inscrit", "iscritto")):
-            score -= 40
-
-    return max(0, min(100, score))
+    breakdown = compute_zefix_score_breakdown(
+        legal_form=legal_form,
+        legal_form_short_name=legal_form_short_name,
+        capital_nominal=capital_nominal,
+        purpose=purpose,
+        branch_offices=branch_offices,
+        industry=industry,
+        status=status,
+        canton=canton,
+        municipality=municipality,
+        lat=lat,
+        lon=lon,
+        config=config,
+    )
+    return int(breakdown["final_score"])

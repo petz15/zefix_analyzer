@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
 
 from app.database import Base, engine
+from app.services.scoring import get_default_scoring_config
 from app.ui.routes import router as ui_router
 
 
@@ -107,6 +108,7 @@ def _seed_settings(app_state) -> None:
         "google_search_enabled": "true" if settings.google_search_enabled else "false",
         "google_daily_quota": str(settings.google_daily_quota),
     }
+    defaults.update(get_default_scoring_config())
     try:
         with SessionLocal() as db:
             seed_defaults(db, defaults)
@@ -123,6 +125,7 @@ async def lifespan(app: FastAPI):
     app.state.startup_error = None
     app.state.startup_started_at = time.time()
     app.state.collection_task = None  # populated while a collection job runs
+    app.state.job_worker_running = False
 
     async def _startup() -> None:
         try:

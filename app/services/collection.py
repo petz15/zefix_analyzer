@@ -25,7 +25,12 @@ from app.api.zefix_client import (
 )
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
-from app.services.scoring import compute_zefix_score, score_result
+from app.services.scoring import (
+    compute_zefix_score,
+    compute_zefix_score_breakdown,
+    get_default_scoring_config,
+    score_result,
+)
 
 _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
     ("Technology", ["software", "informatik", "it-", " it ", "digital", "technologie", "saas", "cloud", "künstliche intelligenz", " ai ", " ki ", "automation", "programmier", "developer", "entwicklung von"]),
@@ -54,7 +59,17 @@ def _derive_industry(purpose: str | None) -> str | None:
     return None
 
 
-def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCreate:
+def _load_scoring_config(db: Session) -> dict[str, str]:
+    defaults = get_default_scoring_config()
+    return {key: crud.get_setting(db, key, val) for key, val in defaults.items()}
+
+
+def _extract_company_fields(
+    raw: dict[str, Any],
+    fallback_uid: str,
+    *,
+    scoring_config: dict[str, str] | None = None,
+) -> CompanyCreate:
     name_raw = raw.get("name", "")
     if isinstance(name_raw, dict):
         name = (
@@ -143,7 +158,7 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
     industry = _derive_industry(purpose)
-    zefix_score = compute_zefix_score(
+    score_breakdown = compute_zefix_score_breakdown(
         legal_form=legal_form_display,
         legal_form_short_name=legal_form_short,
         capital_nominal=capital_nominal,
@@ -153,7 +168,9 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
         status=str(raw.get("status", "")) or None,
         canton=raw.get("canton") or None,
         municipality=raw.get("municipality") or raw.get("legalSeat") or None,
+        config=scoring_config,
     )
+    zefix_score = int(score_breakdown["final_score"])
 
     return CompanyCreate(
         uid=uid_normalised,
@@ -169,6 +186,7 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
         address=address_str,
         industry=industry,
         zefix_score=zefix_score,
+        zefix_score_breakdown=json.dumps(score_breakdown),
         ehraid=ehraid,
         chid=chid,
         legal_seat_id=legal_seat_id,
@@ -196,7 +214,8 @@ def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]
         (company, created)
     """
     raw = zefix_get_company(uid)
-    company_data = _extract_company_fields(raw, uid)
+    scoring_config = _load_scoring_config(db)
+    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config)
 
     existing = crud.get_company_by_uid(db, company_data.uid)
     if existing:
@@ -227,7 +246,8 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         return False
 
     lat, lon = coords
-    new_score = compute_zefix_score(
+    scoring_config = _load_scoring_config(db)
+    score_breakdown = compute_zefix_score_breakdown(
         legal_form=company.legal_form,
         legal_form_short_name=company.legal_form_short_name,
         capital_nominal=company.capital_nominal,
@@ -239,9 +259,75 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         municipality=company.municipality,
         lat=lat,
         lon=lon,
+        config=scoring_config,
     )
-    crud.update_company(db, company, CompanyUpdate(lat=lat, lon=lon, zefix_score=new_score))
+    crud.update_company(
+        db,
+        company,
+        CompanyUpdate(
+            lat=lat,
+            lon=lon,
+            zefix_score=int(score_breakdown["final_score"]),
+            zefix_score_breakdown=json.dumps(score_breakdown),
+        ),
+    )
     return True
+
+
+def recalculate_zefix_scores(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Recompute zefix_score for every company using the current scoring algorithm.
+
+    Useful after changing scoring weights — no network calls are made.
+    Commits in batches of *batch_size* to avoid holding a huge transaction.
+
+    Returns:
+        ``{"updated": int, "errors": list[str]}``
+    """
+    stats: dict[str, Any] = {"updated": 0, "errors": []}
+    scoring_config = _load_scoring_config(db)
+
+    total = db.query(Company).count()
+    offset = 0
+
+    while True:
+        batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                score_breakdown = compute_zefix_score_breakdown(
+                    legal_form=company.legal_form,
+                    legal_form_short_name=company.legal_form_short_name,
+                    capital_nominal=company.capital_nominal,
+                    purpose=company.purpose,
+                    branch_offices=company.branch_offices,
+                    industry=company.industry,
+                    status=company.status,
+                    canton=company.canton,
+                    municipality=company.municipality,
+                    lat=company.lat,
+                    lon=company.lon,
+                    config=scoring_config,
+                )
+                company.zefix_score = int(score_breakdown["final_score"])
+                company.zefix_score_breakdown = json.dumps(score_breakdown)
+                stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {exc}")
+
+        db.commit()
+        offset += batch_size
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
 
 
 def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tuple[bool, str | None]:
@@ -303,6 +389,7 @@ def initial_collect(
     run_google: bool = True,
     canton: str | None = None,
     legal_form: str | None = None,
+    progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a one-time collection from explicit UIDs and search terms."""
     stats: dict[str, Any] = {
@@ -328,6 +415,8 @@ def initial_collect(
                     stats["google_no_result"] += 1
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"UID {uid_clean}: {exc}")
+        if progress_cb:
+            progress_cb(stats)
 
     for name in names:
         name_clean = name.strip()
@@ -357,6 +446,8 @@ def initial_collect(
                         stats["google_no_result"] += 1
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"UID {result.uid} from search '{name_clean}': {exc}")
+            if progress_cb:
+                progress_cb(stats)
 
     return stats
 
@@ -446,6 +537,7 @@ def bulk_import_zefix(
         progress_cb: Optional callable(canton, prefix, created, skipped).
     """
     target_cantons = cantons or SWISS_CANTONS
+    scoring_config = _load_scoring_config(db)
 
     # ── Checkpoint / resume ──────────────────────────────────────────────────
     run = None
@@ -476,7 +568,7 @@ def bulk_import_zefix(
     # Fields that come exclusively from Zefix — safe to overwrite on every run
     _ZEFIX_UPDATE_FIELDS = {
         "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "purpose", "industry", "zefix_score",
+        "status", "municipality", "canton", "purpose", "industry", "zefix_score", "zefix_score_breakdown",
         "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     }
 
@@ -524,6 +616,21 @@ def bulk_import_zefix(
                         status=result.status,
                         canton=result.canton or canton,
                         municipality=result.municipality,
+                        config=scoring_config,
+                    ),
+                    zefix_score_breakdown=json.dumps(
+                        compute_zefix_score_breakdown(
+                            legal_form=result.legal_form,
+                            legal_form_short_name=result.legal_form_short_name,
+                            capital_nominal=None,
+                            purpose=result.purpose,
+                            branch_offices=None,
+                            industry=_bulk_industry,
+                            status=result.status,
+                            canton=result.canton or canton,
+                            municipality=result.municipality,
+                            config=scoring_config,
+                        )
                     ),
                     ehraid=result.ehraid,
                     chid=result.chid,

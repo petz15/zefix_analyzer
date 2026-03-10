@@ -85,6 +85,7 @@
     {% if company.capital_nominal %}
     <dt>Capital</dt><dd>{{ company.capital_nominal }}{% if company.capital_currency %} {{ company.capital_currency }}{% endif %}</dd>
     {% endif %}
+    <dt>Zefix score</dt><dd>{{ company.zefix_score if company.zefix_score is not none else "-" }}</dd>
     {% if company.cantonal_excerpt_web %}
     <dt>Registry</dt><dd><a href="{{ company.cantonal_excerpt_web }}" target="_blank" rel="noopener noreferrer">Cantonal excerpt ↗</a></dd>
     {% endif %}
@@ -95,6 +96,30 @@
     <dt>Created</dt><dd>{{ company.created_at.strftime('%Y-%m-%d') }}</dd>
     <dt>Updated</dt><dd>{{ company.updated_at.strftime('%Y-%m-%d') }}</dd>
   </dl>
+
+  {% if zefix_score_breakdown %}
+  <details style="margin-top:0.8rem;">
+    <summary class="section-toggle">Zefix Score Breakdown</summary>
+    <div class="table-wrap" style="margin-top:0.6rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for key, value in zefix_score_breakdown.items() %}
+          <tr>
+            <td>{{ key }}</td>
+            <td>{{ value }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </section>
 
 {# ── Edit company fields ──────────────────────────────────────────────────── #}

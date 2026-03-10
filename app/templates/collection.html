@@ -97,7 +97,7 @@
       run a batch afterwards to enrich. Uses the canton-list endpoint with pagination
       so no per-company detail call is made, keeping request volume low.
     </p>
-    <form method="post" action="/ui/collection/bulk" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+    <form method="post" action="/ui/collection/bulk">
       <div style="margin-bottom:0.8rem;">
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
           Cantons (blank = all 26)
@@ -132,7 +132,7 @@
       results against the company profile, and saves the best-matching website URL.
       Respects the daily Google quota set in Settings.
     </p>
-    <form method="post" action="/ui/collection/batch" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+    <form method="post" action="/ui/collection/batch">
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
         <div>
           <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
@@ -172,7 +172,7 @@
     Optionally re-scores existing Google results with the freshly fetched purpose
     and location data (only if no score exists yet, so no API calls are spent).
   </p>
-  <form method="post" action="/ui/collection/detail" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+  <form method="post" action="/ui/collection/detail">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
@@ -218,7 +218,7 @@
     Each imported company can optionally be enriched with Google Search immediately.
     Use this for targeted lookups before or instead of a full bulk sweep.
   </p>
-  <form method="post" action="/ui/collection/initial" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+  <form method="post" action="/ui/collection/initial">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
