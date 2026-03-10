@@ -27,7 +27,12 @@
       "Bash(grep -n \"def ui_index\\\\|def ui_dashboard\\\\|@router.get.*ui.*[''''\"\"]$\\\\|templates.TemplateResponse.*index\" \"c:/D/coding_projects/zefix_analyzer/app/ui/routes.py\")",
       "Bash(.venv/Scripts/python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(''OK'',f\\) for f in [''app/ui/routes.py'']]\")",
       "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\(''app/ui/routes.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
-      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/templates/*.html)"
+      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/templates/*.html)",
+      "Bash(curl -sL \"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\" -o app/static/vendor/leaflet.css)",
+      "Bash(curl -sL \"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\" -o app/static/vendor/leaflet.js)",
+      "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css\" -o app/static/vendor/MarkerCluster.css)",
+      "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css\" -o app/static/vendor/MarkerCluster.Default.css)",
+      "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js\" -o app/static/vendor/leaflet.markercluster.js)"
     ]
   }
 }

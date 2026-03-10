@@ -18,6 +18,7 @@ COPY . .
 RUN python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_table()" \
     && echo "PLZ geocoding data ready: $(wc -l < data/plz_ch.tsv) entries"
 
+
 EXPOSE 8000
 
 ENTRYPOINT ["sh", "entrypoint.sh"]
