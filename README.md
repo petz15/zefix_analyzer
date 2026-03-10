@@ -61,10 +61,9 @@ All settings are read from environment variables (or a `.env` file):
 | `ZEFIX_API_BASE_URL` | Zefix REST API base URL | `https://www.zefix.admin.ch/ZefixREST/api/v1` |
 | `ZEFIX_API_USERNAME` | HTTP Basic Auth username (optional) | *(empty)* |
 | `ZEFIX_API_PASSWORD` | HTTP Basic Auth password (optional) | *(empty)* |
-| `GOOGLE_SEARCH_ENABLED` | Enable/disable Google Search (also settable via the UI) | `true` |
-| `GOOGLE_API_KEY` | Google Cloud API key | *(required for Google Search)* |
-| `GOOGLE_CSE_ID` | Google Custom Search Engine ID | *(required for Google Search)* |
-| `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `100` |
+| `GOOGLE_SEARCH_ENABLED` | Enable/disable website search (also settable via the UI) | `true` |
+| `SERPER_API_KEY` | Serper.dev API key | *(required for website search)* |
+| `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `83` |
 
 ---
 
@@ -268,6 +267,9 @@ Migrations live in `alembic/versions/`. Current chain:
 | `0002` | Status fields (review, proposal, website score, Google results) |
 | `0003` | Filter indexes |
 | `0004` | Contact fields, industry, tags, collection_runs table |
+| `0005` | App settings table (runtime-configurable Google quota) |
+| `0006` | Zefix administrative fields (ehraid, chid, legalSeatId, legalFormId/uid/shortName, sogcDate, deletionDate) |
+| `0007` | Extended Zefix detail fields (sogcPub, capital, headOffices, branchOffices, hasTakenOver, oldNames, cantonalExcerptWeb) |
 
 ---
 
@@ -277,8 +279,6 @@ Migrations live in `alembic/versions/`. Current chain:
 
 - [ ] **Preserve filters on "Back to list"** — pass referrer or session state so filters survive opening a company detail
 - [ ] **Inline status dropdowns in table** — change review/proposal status without opening the company page or using bulk actions
-- [ ] **Zefix detail enrichment pass** — dedicated `batch --enrich-zefix-only` mode to fill `purpose`/`address` for bulk-imported companies (improves scoring quality)
-- [ ] **Per-company Zefix refresh** — button on the company detail page to re-fetch full details from Zefix for a single company (`GET /company/uid/{uid}`). Bulk re-fetching is impractical due to the Zefix rate limit (~700k companies × 1 request each = days of API calls); individual refresh on demand is the safe alternative. Should preserve manually entered fields (contact info, notes, review/proposal status) and only overwrite Zefix-sourced fields.
 - [ ] **"Not searched vs no result" distinction** — show a visual indicator in the table for companies that were searched but returned no Google results, vs never searched
 
 ### Medium-term
@@ -295,3 +295,63 @@ Migrations live in `alembic/versions/`. Current chain:
 - [ ] **Per-user quota tracking** — replace the global Google quota counter with per-user accounting
 - [ ] **Rate limiting** — throttle Google Search triggers per user to prevent quota exhaustion from concurrent users
 - [ ] **Audit log** — record who changed review/proposal status and when
+
+---
+
+## API Integrations
+
+Currently integrated APIs and planned enrichment sources.
+
+### Integrated
+
+| API | Purpose | Docs |
+|---|---|---|
+| **Zefix REST API** | Primary data source — Swiss commercial register (bulk import, per-UID detail) | [swagger](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html) |
+| **Serper.dev** | Find company websites; results scored 0–100 against company profile | [serper.dev](https://serper.dev) |
+
+### Website search alternatives
+
+Other options if you want to swap out Serper.dev — all return `title`/`link`/`snippet` and only require changing `google_search_client.py`:
+
+| API | Free tier | Paid | Notes |
+|---|---|---|---|
+| **Brave Search API** | 2 000/month | $3 / 1 000 queries | Privacy-focused; good .ch coverage |
+| **Bing Web Search** (Azure) | 1 000/month | $3–7 / 1 000 queries | Reliable; often indexes Swiss SMEs well |
+| **Google Custom Search** | 100/day | $5 / 1 000 queries | Original integration; requires CSE setup |
+| **SerpAPI** | 100/month | $50 / 5k queries | Scrapes live Google; highest fidelity |
+
+### Swiss-specific enrichment
+
+| API | What it adds | Notes |
+|---|---|---|
+| **Moneyhouse** (moneyhouse.ch) | Revenue estimates, employee headcount, balance sheet summaries | Best signal for lead scoring; no public API — requires partnership or scraping |
+| **local.ch / search.ch** | Phone numbers, opening hours, customer reviews | Covers most Swiss SMEs; no official API |
+| **Swiss Post Address API** | Address validation and normalisation, PLZ lookup | Free for moderate volumes; useful for deduplication |
+| **SECO / cantonal registers** | Official cantonal excerpt links (already extracted as `cantonal_excerpt_web`) | Already partially integrated |
+
+### Company enrichment (global, works for .ch companies)
+
+| API | What it adds | Free tier |
+|---|---|---|
+| **Clearbit Enrichment** | Industry, employee count, revenue range, tech stack, LinkedIn URL, logo | 50 lookups/month free |
+| **Apollo.io** | Contact emails, phone numbers, company size, funding rounds | 50 exports/month free |
+| **Hunter.io** | Email addresses by domain (auto-populate `contact_email`) | 25 searches/month free |
+| **OpenCorporates** | Global company register data including CH; alternative to Zefix for cross-border | Free for non-commercial |
+| **Crunchbase** | Startup funding, investor data, founded date | Paid API |
+
+### Lead scoring signals
+
+| API | Signal | Why it helps |
+|---|---|---|
+| **Google Maps Places** | Ratings, reviews, phone number, business category | Validates the found website URL; rating count signals active business |
+| **Wappalyzer API** | Tech stack detection from website | Filter leads by technology — e.g. only companies without a CRM are worth targeting |
+| **SimilarWeb** | Monthly traffic estimate | Filters out ghost companies with no web presence |
+| **BuiltWith** | Detailed tech stack + CMS/e-commerce platform | Identifies upsell opportunities or disqualifiers |
+
+### CI/CD & infrastructure
+
+| Tool | Purpose |
+|---|---|
+| **GitHub Actions + SSH** | Deploy on push to `main` — `git pull` → `docker compose build` → `alembic upgrade head` → `docker compose up -d` |
+| **Tailscale** | Secure access to the server without opening ports, enables GitHub Actions deployment to a NAT-ed home server |
+| **Watchtower** | Auto-pull updated Docker images (alternative to SSH deploy for simple setups) |

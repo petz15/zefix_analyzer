@@ -18,8 +18,7 @@ class Settings(BaseSettings):
     zefix_api_password: str = ""
 
     google_search_enabled: bool = True
-    google_api_key: str = ""
-    google_cse_id: str = ""
+    serper_api_key: str = ""
     google_daily_quota: int = 100
 
 

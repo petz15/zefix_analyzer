@@ -724,8 +724,6 @@ async def start_detail(
     request: Request,
     cantons: str = Form(""),        # comma-separated canton codes, blank = all in DB
     uids: str = Form(""),           # newline-separated UIDs for specific companies
-    limit: int = Form(500),
-    skip: int = Form(0),
     score_if_missing: str = Form("true"),
     delay: float = Form(0.3),
 ) -> RedirectResponse:
@@ -767,8 +765,6 @@ async def start_detail(
                     db,
                     cantons=canton_list,
                     uids=uid_list,
-                    limit=limit,
-                    skip=skip,
                     score_if_missing=score_if_missing == "true",
                     request_delay=delay,
                     progress_cb=progress_cb,

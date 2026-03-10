@@ -1,6 +1,6 @@
-"""Client for the Google Custom Search JSON API.
+"""Client for the Serper.dev Google Search API.
 
-Documentation: https://developers.google.com/custom-search/v1/using_rest
+Documentation: https://serper.dev/
 """
 
 import httpx
@@ -8,41 +8,41 @@ import httpx
 from app.config import settings
 from app.schemas.company import GoogleSearchResult
 
-_GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
+_SERPER_URL = "https://google.serper.dev/search"
 
 
 def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResult]:
-    """Search for a company's website using Google Custom Search.
+    """Search for a company's website using the Serper.dev API.
 
     Args:
         company_name: The company name to search for.
-        num: Number of results to return (1-10, as limited by the API).
+        num: Number of results to return (1-10).
 
     Returns:
         A list of :class:`GoogleSearchResult` instances.
 
     Raises:
-        ValueError: If the Google API key or CSE ID is not configured.
-        httpx.HTTPStatusError: If the Google API returns a non-2xx response.
+        ValueError: If the Serper API key is not configured.
+        httpx.HTTPStatusError: If the Serper API returns a non-2xx response.
     """
-    if not settings.google_api_key or not settings.google_cse_id:
-        raise ValueError(
-            "GOOGLE_API_KEY and GOOGLE_CSE_ID must be set to use the Google Search integration."
-        )
+    if not settings.serper_api_key:
+        raise ValueError("SERPER_API_KEY must be set to use the search integration.")
 
-    params = {
-        "key": settings.google_api_key,
-        "cx": settings.google_cse_id,
+    payload = {
         "q": company_name,
         "num": min(max(1, num), 10),
     }
+    headers = {
+        "X-API-KEY": settings.serper_api_key,
+        "Content-Type": "application/json",
+    }
 
     with httpx.Client(timeout=30.0) as client:
-        response = client.get(_GOOGLE_SEARCH_URL, params=params)
+        response = client.post(_SERPER_URL, json=payload, headers=headers)
         response.raise_for_status()
 
     data = response.json()
-    items = data.get("items", [])
+    items = data.get("organic", [])
     return [
         GoogleSearchResult(
             title=item.get("title", ""),

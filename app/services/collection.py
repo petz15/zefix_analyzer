@@ -547,8 +547,6 @@ def run_zefix_detail_collect(
     *,
     cantons: list[str] | None = None,
     uids: list[str] | None = None,
-    limit: int = 500,
-    skip: int = 0,
     score_if_missing: bool = True,
     request_delay: float = 0.3,
     progress_cb: Any = None,
@@ -560,9 +558,9 @@ def run_zefix_detail_collect(
     existing Google results with the freshly fetched purpose / municipality data.
 
     Targeting priority:
-        1. Explicit *uids* list.
-        2. *cantons* filter (all DB companies in those cantons).
-        3. All companies, paginated by *limit* / *skip*.
+        1. Explicit *uids* list — processes exactly those companies.
+        2. *cantons* filter — all DB companies in those cantons.
+        3. No filter — all companies in the database.
 
     Scoring applies only when *score_if_missing* is True **and** the company has
     stored Google results but no ``website_match_score`` yet.
@@ -585,12 +583,10 @@ def run_zefix_detail_collect(
         companies = (
             db.query(Company)
             .filter(Company.canton.in_(cantons))
-            .offset(skip)
-            .limit(limit)
             .all()
         )
     else:
-        companies = db.query(Company).offset(skip).limit(limit).all()
+        companies = db.query(Company).all()
 
     stats["selected"] = len(companies)
     total = len(companies)
