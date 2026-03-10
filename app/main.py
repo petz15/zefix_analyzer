@@ -4,8 +4,6 @@ from contextlib import asynccontextmanager
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,26 +21,6 @@ def _database_has_tables() -> bool:
     """Return True if the database already has any tables."""
     with engine.connect() as conn:
         return bool(sa_inspect(conn).get_table_names())
-
-
-def _get_pending_revisions(cfg: AlembicConfig) -> list:
-    """Return revisions that still need to be applied, oldest first."""
-    script = ScriptDirectory.from_config(cfg)
-    with engine.connect() as conn:
-        ctx = MigrationContext.configure(conn)
-        current_rev = ctx.get_current_revision()
-
-    revisions = list(script.walk_revisions(base="base", head="heads"))
-    revisions.reverse()  # oldest → newest
-
-    if current_rev is None:
-        return revisions
-
-    for i, rev in enumerate(revisions):
-        if rev.revision == current_rev:
-            return revisions[i + 1:]
-
-    return []
 
 
 def _run_migrations(app_state) -> None:
@@ -71,31 +49,14 @@ def _run_migrations(app_state) -> None:
         app_state.startup_message = "Database initialised ✓"
         return
 
-    # ── Existing database: apply any pending migrations ────────────────────────
+    # ── Existing database: apply all pending migrations in one call ────────────
+    app_state.startup_message = "Applying pending migrations…"
     try:
-        pending = _get_pending_revisions(cfg)
+        alembic_command.upgrade(cfg, "head")
     except Exception as exc:
-        raise RuntimeError(f"Cannot read migration state: {exc}") from exc
+        raise RuntimeError(f"Database migration failed: {exc}") from exc
 
-    if not pending:
-        app_state.startup_message = "Database schema is up to date"
-        return
-
-    total = len(pending)
-    app_state.startup_message = f"Found {total} pending migration(s)"
-    time.sleep(0.3)  # brief pause so the message is visible
-
-    for i, rev in enumerate(pending, 1):
-        label = rev.doc or rev.revision
-        app_state.startup_message = f"Migration {i}/{total}: {label}"
-        try:
-            alembic_command.upgrade(cfg, rev.revision)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Migration {i}/{total} failed ({rev.revision} — {label}): {exc}"
-            ) from exc
-
-    app_state.startup_message = f"Applied {total} migration(s) ✓"
+    app_state.startup_message = "Database schema is up to date ✓"
 
 
 def _seed_settings(app_state) -> None:

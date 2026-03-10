@@ -8,9 +8,11 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **Configurable scoring** – tune Zefix scoring weights/penalties in the Settings UI without code changes
 * **Score explainability** – per-company Zefix score breakdown (component contributions + forced-zero reason)
 * **Offline geocoding** – Swiss PLZ → lat/lon lookup via GeoNames dataset (downloaded once, no API key); proximity to Muri bei Bern factored into the score
+* **Interactive map** – `/ui/map` plots all geocoded companies on a Leaflet.js map, coloured by Google score (green/yellow/red/grey); filterable by canton, review status, score thresholds
 * **Persistent background jobs** – DB-backed queue for bulk/batch/detail/initial/scoring jobs; survives closing/reopening the UI
-* **Jobs dashboard** – `/ui/jobs` shows queued/running/completed/failed/cancelled jobs with progress and timestamps
-* **Job cancellation + event stream** – cancel queued/running jobs and inspect per-job event logs
+* **Jobs dashboard** – `/ui/jobs` shows queued/running/paused/completed/failed/cancelled jobs with progress and timestamps
+* **Job pause + resume** – pause a running job at the next checkpoint, start another, then resume from where it left off
+* **Job cancellation + event stream** – cancel queued/running/paused jobs and inspect per-job event logs
 * **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status; shows a live banner when jobs are running
 * **Company detail** – view enriched data, pick best website from search results, add contact info and notes; "Refresh from Zefix" button re-fetches and geocodes on demand
 * **CSV export** – export any filtered view to CSV
@@ -83,11 +85,13 @@ All settings are read from environment variables (or a `.env` file):
 ## GUI Workflow
 
 1. **Bulk import** all companies from Zefix (see below) — one-time, ~hours
-2. **Batch enrich** with Google Search to find websites — runs daily against free 100-query quota
-3. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, score; sort; paginate; bulk-update
-4. **Company detail** — pick best website from Google results, set contact info, add research notes
-5. **Jobs** at `/ui/jobs` — monitor queue/runs, view event stream, cancel queued/running jobs
-6. **Export CSV** — download any filtered view
+2. **Detail fetch** from Collection — populates address, purpose, and geocodes lat/lon
+3. **Batch enrich** with Google Search to find websites — runs daily against free 100-query quota
+4. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, score; sort; paginate; bulk-update
+5. **Map** at `/ui/map` — geographic overview of geocoded companies, coloured by Google score
+6. **Company detail** — pick best website from Google results, set contact info, add research notes
+7. **Jobs** at `/ui/jobs` — monitor queue/runs, pause/resume, view event stream, cancel jobs
+8. **Export CSV** — download any filtered view
 
 ### Status fields
 
@@ -138,7 +142,6 @@ python -m app.run_collector batch --limit 100 --refresh-zefix   # also re-fetch 
 
 Flags:
 * `--limit 100` — max companies to process (default: 100)
-* `--skip 200` — record offset, for manual pagination of large runs
 * `--all-companies` — process all companies, not only those missing a website
 * `--refresh-zefix` — re-fetch full Zefix details (purpose, address) before Google step
 * `--skip-google` — skip Google Search (useful with `--refresh-zefix` for data refresh only)
@@ -267,8 +270,8 @@ Tests use an in-memory SQLite database — no PostgreSQL required.
 
 ## Database migrations
 
-The app runs migrations automatically on startup/restart (via Alembic in `app.main`).
-If the DB is reachable and credentials/permissions are valid, pending revisions are applied before the app becomes ready.
+Migrations run automatically on every container start (via `alembic upgrade head` in `app.main` during lifespan startup).
+If the DB is reachable and credentials/permissions are valid, all pending revisions are applied before the app becomes ready.
 
 ```bash
 alembic upgrade head      # apply all migrations
@@ -288,6 +291,7 @@ Recent additions include:
 | `0005` | App settings table (runtime-configurable Google quota) |
 | `0010` | `job_runs` queue table + `companies.zefix_score_breakdown` |
 | `0011` | Job cancellation support (`job_runs.cancel_requested`) + `job_run_events` log stream |
+| `0012` | Job pause support (`job_runs.pause_requested`) |
 
 For the complete lineage in your environment, use `alembic history`.
 
@@ -367,8 +371,9 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 
 - Jobs can be queued from the UI: bulk import, batch enrichment, detail fetch, initial import, and score recalculation
 - Closing the browser/UI window does not stop jobs
-- Reopening `/ui/jobs` shows queued/running/completed/failed/cancelled runs
-- Running jobs support cooperative cancellation (stop at next checkpoint)
+- Reopening `/ui/jobs` shows queued/running/paused/completed/failed/cancelled runs
+- Running jobs support cooperative **pause** and **cancel** at the next checkpoint
+- Paused jobs preserve their `progress_done` resume point; resuming re-queues from there
 - Per-job event stream is persisted in `job_run_events`
 - Collection and Jobs pages auto-refresh while active jobs exist
 
