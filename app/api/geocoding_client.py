@@ -232,26 +232,35 @@ def _get_db() -> sqlite3.Connection | None:
         return _db_conn
 
 
+_NON_STREET_RE = re.compile(r"^(postfach|c/o|p\.?o\.?\s*box)\b", re.IGNORECASE)
+
+
 def _parse_address(address: str) -> tuple[str, str, str] | None:
     """Extract (plz, street, house) from a Zefix address string.
 
     Zefix builds addresses as comma-joined segments:
-        [org,] [c/o careOf,] street housenumber, plz city [, addon...]
+        [org,] [c/o careOf,] street housenumber, [addon,] [Postfach N,] plz city
 
-    We find the segment that starts with a 4-digit PLZ and take the segment
-    immediately before it as "street housenumber".
+    We find the PLZ segment, then search backwards skipping Postfach/addon/c/o
+    entries until we find a segment that looks like "street housenumber".
     """
     parts = [p.strip() for p in address.split(",")]
     for i, part in enumerate(parts):
         m_plz = re.match(r"^(\d{4})\b", part)
         if m_plz and i > 0:
             plz = m_plz.group(1)
-            street_house = parts[i - 1].strip()
-            m_sh = _STREET_HOUSE_RE.match(street_house)
-            if m_sh:
-                return plz, m_sh.group("street"), m_sh.group("house")
-            # No house number — street only (e.g. "Bahnhofstrasse, 8001 Zürich")
-            return plz, street_house, ""
+            # Walk backwards, skipping non-street segments
+            for j in range(i - 1, -1, -1):
+                candidate = parts[j].strip()
+                if _NON_STREET_RE.match(candidate):
+                    continue
+                m_sh = _STREET_HOUSE_RE.match(candidate)
+                if m_sh:
+                    return plz, m_sh.group("street"), m_sh.group("house")
+                # Segment has no house number (e.g. bare street name) — still usable
+                if candidate:
+                    return plz, candidate, ""
+            break
     return None
 
 

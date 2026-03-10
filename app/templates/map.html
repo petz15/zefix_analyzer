@@ -101,6 +101,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 var clusters = null;
+var loadSeq = 0;
+var loadTimer = null;
 
 function scoreColor(s) {
   if (s === null || s === undefined) return '#6b7280';
@@ -137,20 +139,26 @@ function makeMarker(f) {
 }
 
 function loadData(params) {
+  loadSeq += 1;
+  var reqId = loadSeq;
   document.getElementById('map-info').textContent = 'Loading…';
   var qs = new URLSearchParams(params).toString();
   fetch('/api/map-data' + (qs ? '?' + qs : ''))
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      if (reqId !== loadSeq) return;
       if (clusters) { map.removeLayer(clusters); }
       clusters = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 40 });
       data.features.forEach(function(f) {
         clusters.addLayer(makeMarker(f));
       });
       map.addLayer(clusters);
+      var suffix = '';
+      if (data.truncated) {
+        suffix = ' (showing first ' + data.max_points + ', zoom in for more)';
+      }
       document.getElementById('map-info').textContent =
-        data.count + ' compan' + (data.count === 1 ? 'y' : 'ies') + ' shown' +
-        (data.count === 5000 ? ' (limit)' : '');
+        data.count + ' compan' + (data.count === 1 ? 'y' : 'ies') + ' shown' + suffix;
     })
     .catch(function() {
       document.getElementById('map-info').textContent = 'Failed to load data.';
@@ -164,24 +172,41 @@ function currentParams() {
   var fd = new FormData(form);
   var p = {};
   fd.forEach(function(v, k) { if (v) p[k] = v; });
+  var b = map.getBounds();
+  p.min_lat = b.getSouth().toFixed(6);
+  p.max_lat = b.getNorth().toFixed(6);
+  p.min_lon = b.getWest().toFixed(6);
+  p.max_lon = b.getEast().toFixed(6);
   return p;
+}
+
+function scheduleLoad() {
+  if (loadTimer) {
+    clearTimeout(loadTimer);
+  }
+  loadTimer = setTimeout(function() {
+    loadData(currentParams());
+  }, 180);
 }
 
 form.addEventListener('submit', function(e) {
   e.preventDefault();
-  var p = currentParams();
+  var p = {};
+  new FormData(form).forEach(function(v, k) { if (v) p[k] = v; });
   // Update URL without reload
   history.replaceState(null, '', '/ui/map' + (Object.keys(p).length ? '?' + new URLSearchParams(p) : ''));
-  loadData(p);
+  scheduleLoad();
 });
 
 document.getElementById('btn-clear').addEventListener('click', function() {
   form.reset();
   history.replaceState(null, '', '/ui/map');
-  loadData({});
+  scheduleLoad();
 });
 
+map.on('moveend zoomend', scheduleLoad);
+
 // ── Initial load using server-rendered filter values ─────────────────────────
-loadData(currentParams());
+scheduleLoad();
 </script>
 {% endblock %}

@@ -77,7 +77,7 @@ def _seed_settings(app_state) -> None:
         raise RuntimeError(f"Failed to seed settings: {exc}") from exc
 
 
-def _maybe_enqueue_geocode_upgrade(app_state) -> None:
+def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
     """Queue the one-time re-geocode job if it hasn't been completed yet.
 
     The job itself will trigger the geocoding DB download if it doesn't exist yet.
@@ -85,6 +85,7 @@ def _maybe_enqueue_geocode_upgrade(app_state) -> None:
     from app.crud import create_event, create_job, get_setting, list_jobs
     from app.database import SessionLocal
 
+    queued_job = False
     with SessionLocal() as db:
         if get_setting(db, "geocoding_building_level_done", "false") == "true":
             return  # already upgraded
@@ -103,6 +104,11 @@ def _maybe_enqueue_geocode_upgrade(app_state) -> None:
             params={},
         )
         create_event(db, job_id=job.id, level="info", message="Auto-queued by startup")
+        queued_job = True
+
+    if queued_job:
+        # Ensure the auto-queued upgrade job does not wait for a UI request.
+        kick_job_worker(app)
     app_state.startup_message = "Queued one-time geocoding upgrade"
 
 
@@ -141,7 +147,7 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _run_migrations, app.state)
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
-            await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app.state)
+            await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001

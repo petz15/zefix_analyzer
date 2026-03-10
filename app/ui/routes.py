@@ -34,6 +34,7 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["tojson_parse"] = lambda s: json.loads(s) if s else {}
 
 PAGE_SIZE = 50
+MAP_DATA_MAX_POINTS = 20000
 
 
 class JobCancelledError(Exception):
@@ -208,6 +209,10 @@ def api_map_data(
     google_searched: str | None = Query(None),
     min_google_score: int | None = Query(None),
     min_zefix_score: int | None = Query(None),
+    min_lat: float | None = Query(None),
+    max_lat: float | None = Query(None),
+    min_lon: float | None = Query(None),
+    max_lon: float | None = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return lightweight JSON for the map — only geocoded companies."""
@@ -240,8 +245,17 @@ def api_map_data(
         query = query.filter(CompanyModel.website_match_score >= min_google_score)
     if min_zefix_score is not None:
         query = query.filter(CompanyModel.zefix_score >= min_zefix_score)
+    if None not in (min_lat, max_lat):
+        query = query.filter(CompanyModel.lat >= min_lat, CompanyModel.lat <= max_lat)
+    if None not in (min_lon, max_lon):
+        query = query.filter(CompanyModel.lon >= min_lon, CompanyModel.lon <= max_lon)
 
-    rows = query.limit(5000).all()
+    # Keep the endpoint responsive when users are zoomed out over very large areas.
+    rows = query.limit(MAP_DATA_MAX_POINTS + 1).all()
+    truncated = len(rows) > MAP_DATA_MAX_POINTS
+    if truncated:
+        rows = rows[:MAP_DATA_MAX_POINTS]
+
     features = [
         {
             "id": r.id,
@@ -257,7 +271,14 @@ def api_map_data(
         }
         for r in rows
     ]
-    return JSONResponse({"count": len(features), "features": features})
+    return JSONResponse(
+        {
+            "count": len(features),
+            "features": features,
+            "truncated": truncated,
+            "max_points": MAP_DATA_MAX_POINTS,
+        }
+    )
 
 
 @router.get("/ui/export.csv", include_in_schema=False)
