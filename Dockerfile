@@ -13,6 +13,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Pre-download GeoNames CH postal code dataset so geocoding works offline
+# (file is git-ignored; baking it into the image avoids runtime download failures)
+RUN python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_table()" \
+    && echo "PLZ geocoding data ready: $(wc -l < data/plz_ch.tsv) entries"
+
 EXPOSE 8000
 
 ENTRYPOINT ["sh", "entrypoint.sh"]
