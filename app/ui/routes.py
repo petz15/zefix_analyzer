@@ -173,6 +173,92 @@ def ui_home(
     )
 
 
+@router.get("/ui/map", response_class=HTMLResponse, include_in_schema=False)
+def ui_map(
+    request: Request,
+    canton: str | None = Query(None),
+    review_status: str | None = Query(None),
+    google_searched: str | None = Query(None),
+    min_google_score: str | None = Query(None),
+    min_zefix_score: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    return templates.TemplateResponse(
+        "map.html",
+        {
+            "request": request,
+            "cantons": SWISS_CANTONS,
+            "f_canton": canton or "",
+            "f_review_status": review_status or "",
+            "f_google_searched": google_searched or "",
+            "f_min_google_score": min_google_score or "",
+            "f_min_zefix_score": min_zefix_score or "",
+        },
+    )
+
+
+from fastapi.responses import JSONResponse  # noqa: E402 (local import to avoid top-level churn)
+
+
+@router.get("/api/map-data", include_in_schema=False)
+def api_map_data(
+    canton: str | None = Query(None),
+    review_status: str | None = Query(None),
+    google_searched: str | None = Query(None),
+    min_google_score: int | None = Query(None),
+    min_zefix_score: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Return lightweight JSON for the map — only geocoded companies."""
+    from app.models.company import Company as CompanyModel
+    query = db.query(
+        CompanyModel.id,
+        CompanyModel.name,
+        CompanyModel.lat,
+        CompanyModel.lon,
+        CompanyModel.website_match_score,
+        CompanyModel.zefix_score,
+        CompanyModel.canton,
+        CompanyModel.municipality,
+        CompanyModel.website_url,
+        CompanyModel.review_status,
+    ).filter(
+        CompanyModel.lat.isnot(None),
+        CompanyModel.lon.isnot(None),
+    )
+    if canton:
+        query = query.filter(CompanyModel.canton == canton)
+    if review_status:
+        query = query.filter(CompanyModel.review_status == review_status)
+    searched = _searched_bool(google_searched)
+    if searched is True:
+        query = query.filter(CompanyModel.website_checked_at.isnot(None))
+    elif searched is False:
+        query = query.filter(CompanyModel.website_checked_at.is_(None))
+    if min_google_score is not None:
+        query = query.filter(CompanyModel.website_match_score >= min_google_score)
+    if min_zefix_score is not None:
+        query = query.filter(CompanyModel.zefix_score >= min_zefix_score)
+
+    rows = query.limit(5000).all()
+    features = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "lat": r.lat,
+            "lon": r.lon,
+            "google_score": r.website_match_score,
+            "zefix_score": r.zefix_score,
+            "canton": r.canton,
+            "municipality": r.municipality,
+            "website": r.website_url,
+            "review": r.review_status,
+        }
+        for r in rows
+    ]
+    return JSONResponse({"count": len(features), "features": features})
+
+
 @router.get("/ui/export.csv", include_in_schema=False)
 def export_csv(
     q: str | None = Query(None),
@@ -996,7 +1082,6 @@ def ui_collection(
     task = getattr(request.app.state, "collection_task", None)
     incomplete_bulk = crud.get_last_incomplete_bulk(db)
     runs = crud.list_runs(db, limit=20)
-    jobs = crud.list_jobs(db, limit=20)
     return templates.TemplateResponse(
         "collection.html",
         {
@@ -1005,7 +1090,6 @@ def ui_collection(
             "cantons": SWISS_CANTONS,
             "incomplete_bulk": incomplete_bulk,
             "runs": runs,
-            "jobs": jobs,
             "message": message,
             "error": error,
         },

@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN2GqAQ=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
+<style>
+  #map-wrap { display: flex; gap: 1rem; height: calc(100vh - 130px); }
+  #map      { flex: 1; border-radius: 6px; border: 1px solid var(--line); }
+  #sidebar  { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+  #map-info { font-size: 0.83rem; color: var(--muted); }
+  .legend   { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; }
+  .legend-row { display: flex; align-items: center; gap: 0.5rem; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); flex-shrink:0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="map-wrap">
+
+  {# ── Sidebar ──────────────────────────────────────────────────────────── #}
+  <div id="sidebar">
+    <div class="card" style="padding:0.8rem; flex-shrink:0;">
+      <h3 style="margin:0 0 0.7rem; font-size:0.95rem;">Filters</h3>
+      <form id="filter-form" style="display:flex; flex-direction:column; gap:0.55rem;">
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Canton</span>
+          <select name="canton" style="padding:0.3rem 0.5rem;">
+            <option value="">All</option>
+            {% for c in cantons %}
+            <option value="{{ c }}" {% if f_canton == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Review status</span>
+          <select name="review_status" style="padding:0.3rem 0.5rem;">
+            <option value="">All</option>
+            <option value="confirmed"   {% if f_review_status == 'confirmed'   %}selected{% endif %}>Confirmed</option>
+            <option value="interesting" {% if f_review_status == 'interesting' %}selected{% endif %}>Interesting</option>
+            <option value="rejected"    {% if f_review_status == 'rejected'    %}selected{% endif %}>Rejected</option>
+            <option value="_none"       {% if f_review_status == '_none'       %}selected{% endif %}>No status</option>
+          </select>
+        </label>
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Google searched</span>
+          <select name="google_searched" style="padding:0.3rem 0.5rem;">
+            <option value="">All</option>
+            <option value="yes" {% if f_google_searched == 'yes' %}selected{% endif %}>Searched</option>
+            <option value="no"  {% if f_google_searched == 'no'  %}selected{% endif %}>Not searched</option>
+          </select>
+        </label>
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Min Google score</span>
+          <input type="number" name="min_google_score" value="{{ f_min_google_score }}"
+                 min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
+        </label>
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Min Zefix score</span>
+          <input type="number" name="min_zefix_score" value="{{ f_min_zefix_score }}"
+                 min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
+        </label>
+
+        <button type="submit" style="margin-top:0.2rem;">Apply</button>
+        <button type="button" id="btn-clear" class="secondary">Clear</button>
+      </form>
+    </div>
+
+    <div class="card" style="padding:0.8rem; flex-shrink:0;">
+      <p style="margin:0 0 0.5rem; font-size:0.83rem; font-weight:600;">Score color</p>
+      <div class="legend">
+        <div class="legend-row"><div class="legend-dot" style="background:#16a34a;"></div> Google ≥ 70</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#ca8a04;"></div> Google 40–69</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#dc2626;"></div> Google &lt; 40</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#6b7280;"></div> Not scored</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0.8rem;">
+      <p id="map-info">Loading…</p>
+    </div>
+  </div>
+
+  {# ── Map ──────────────────────────────────────────────────────────────── #}
+  <div id="map"></div>
+</div>
+
+<script>
+// ── Map init ────────────────────────────────────────────────────────────────
+var map = L.map('map').setView([46.95, 8.0], 8);  // Switzerland
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 18,
+}).addTo(map);
+
+var clusters = null;
+
+function scoreColor(s) {
+  if (s === null || s === undefined) return '#6b7280';
+  if (s >= 70) return '#16a34a';
+  if (s >= 40) return '#ca8a04';
+  return '#dc2626';
+}
+
+function makeMarker(f) {
+  var color = scoreColor(f.google_score);
+  var m = L.circleMarker([f.lat, f.lon], {
+    radius: 7,
+    fillColor: color,
+    color: '#fff',
+    weight: 1.5,
+    fillOpacity: 0.85,
+  });
+  var popup = '<b><a href="/ui/companies/' + f.id + '" target="_blank">' + f.name + '</a></b>';
+  popup += '<br><span style="color:#6b7280;font-size:0.82em;">' + (f.municipality || '') + (f.canton ? ', ' + f.canton : '') + '</span>';
+  if (f.google_score !== null && f.google_score !== undefined) {
+    popup += '<br>Google score: <b>' + f.google_score + '</b>';
+  }
+  if (f.zefix_score !== null && f.zefix_score !== undefined) {
+    popup += '&nbsp;·&nbsp;Zefix: <b>' + f.zefix_score + '</b>';
+  }
+  if (f.website) {
+    popup += '<br><a href="' + f.website + '" target="_blank" rel="noopener">' + f.website + '</a>';
+  }
+  if (f.review) {
+    popup += '<br>Review: ' + f.review;
+  }
+  m.bindPopup(popup);
+  return m;
+}
+
+function loadData(params) {
+  document.getElementById('map-info').textContent = 'Loading…';
+  var qs = new URLSearchParams(params).toString();
+  fetch('/api/map-data' + (qs ? '?' + qs : ''))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (clusters) { map.removeLayer(clusters); }
+      clusters = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 40 });
+      data.features.forEach(function(f) {
+        clusters.addLayer(makeMarker(f));
+      });
+      map.addLayer(clusters);
+      document.getElementById('map-info').textContent =
+        data.count + ' compan' + (data.count === 1 ? 'y' : 'ies') + ' shown' +
+        (data.count === 5000 ? ' (limit)' : '');
+    })
+    .catch(function() {
+      document.getElementById('map-info').textContent = 'Failed to load data.';
+    });
+}
+
+// ── Filter form ─────────────────────────────────────────────────────────────
+var form = document.getElementById('filter-form');
+
+function currentParams() {
+  var fd = new FormData(form);
+  var p = {};
+  fd.forEach(function(v, k) { if (v) p[k] = v; });
+  return p;
+}
+
+form.addEventListener('submit', function(e) {
+  e.preventDefault();
+  var p = currentParams();
+  // Update URL without reload
+  history.replaceState(null, '', '/ui/map' + (Object.keys(p).length ? '?' + new URLSearchParams(p) : ''));
+  loadData(p);
+});
+
+document.getElementById('btn-clear').addEventListener('click', function() {
+  form.reset();
+  history.replaceState(null, '', '/ui/map');
+  loadData({});
+});
+
+// ── Initial load using server-rendered filter values ─────────────────────────
+loadData(currentParams());
+</script>
+{% endblock %}
