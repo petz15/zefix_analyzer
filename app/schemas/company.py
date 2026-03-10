@@ -47,6 +47,9 @@ class CompanyBase(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
+    zefix_score: int | None = None
+    lat: float | None = None
+    lon: float | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -99,6 +102,9 @@ class CompanyUpdate(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
+    zefix_score: int | None = None
+    lat: float | None = None
+    lon: float | None = None
 
 
 class CompanyRead(CompanyBase):

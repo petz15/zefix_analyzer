@@ -15,7 +15,18 @@
       "WebFetch(domain:www.drupal.org)",
       "WebFetch(domain:amtsblattportal.ch)",
       "Bash(python -m alembic upgrade head)",
-      "Bash(python -c \"from app.models.company import Company; from app.schemas.company import CompanyBase, CompanyUpdate; from app.services.collection import _extract_company_fields; print\\(''OK''\\)\")"
+      "Bash(python -c \"from app.models.company import Company; from app.schemas.company import CompanyBase, CompanyUpdate; from app.services.collection import _extract_company_fields; print\\(''OK''\\)\")",
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(alembic upgrade:*)",
+      "Bash(python -c \"from app.services.scoring import compute_zefix_score; print\\(compute_zefix_score\\(legal_form=''Aktiengesellschaft'', legal_form_short_name=''AG'', capital_nominal=''100000'', purpose=''Entwicklung von Software und IT-Dienstleistungen für Unternehmen in der Schweiz'', branch_offices=''[{\"\"name\"\": \"\"Zurich\"\"}]'', industry=''Technology'', status=''ACTIVE''\\)\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app.services.scoring import compute_zefix_score; print\\(compute_zefix_score\\(legal_form=''Aktiengesellschaft'', legal_form_short_name=''AG'', capital_nominal=''100000'', purpose=''Entwicklung von Software und IT-Dienstleistungen fuer Unternehmen'', branch_offices=''[{\"\"name\"\": \"\"Zurich\"\"}]'', industry=''Technology'', status=''ACTIVE''\\)\\)\")",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -c \":*)",
+      "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\(''app/services/collection.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\(''app/services/scoring.py''\\).read\\(\\)\\); ast.parse\\(open\\(''app/services/collection.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(grep -n \"def ui_index\\\\|def ui_dashboard\\\\|@router.get.*ui.*[''''\"\"]$\\\\|templates.TemplateResponse.*index\" \"c:/D/coding_projects/zefix_analyzer/app/ui/routes.py\")",
+      "Bash(.venv/Scripts/python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(''OK'',f\\) for f in [''app/ui/routes.py'']]\")",
+      "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\(''app/ui/routes.py''\\).read\\(\\)\\); print\\(''OK''\\)\")"
     ]
   }
 }

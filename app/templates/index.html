@@ -1,6 +1,20 @@
 {% extends "base.html" %}
 
+{% if active_task %}
+{% block extra_head %}<meta http-equiv="refresh" content="5">{% endblock %}
+{% endif %}
+
 {% block content %}
+
+{# ── Background collection banner ─────────────────────────────────────────── #}
+{% if active_task %}
+<div class="collection-running-banner">
+  <span class="spinner"></span>
+  <strong>{{ active_task.label }}</strong> is running in the background —
+  {{ active_task.message }}
+  <a href="/ui/collection" style="margin-left:0.75rem;">View progress →</a>
+</div>
+{% endif %}
 
 {# ── Stats bar ────────────────────────────────────────────────────────────── #}
 <section class="card stats-bar">
@@ -223,8 +237,12 @@
             </td>
             <td>
               {% if c.website_match_score is not none %}
-                <span class="score-pill-sm {% if c.website_match_score >= 70 %}score-high{% elif c.website_match_score >= 40 %}score-mid{% else %}score-low{% endif %}">
+                <span class="score-pill-sm {% if c.website_match_score >= 70 %}score-high{% elif c.website_match_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Website match score">
                   {{ c.website_match_score }}
+                </span>
+              {% elif c.zefix_score is not none %}
+                <span class="score-pill-sm score-zefix" title="Zefix priority score (not yet searched)">
+                  {{ c.zefix_score }}
                 </span>
               {% else %}
                 <span class="muted">—</span>

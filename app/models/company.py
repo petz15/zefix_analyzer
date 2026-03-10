@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -58,6 +58,11 @@ class Company(Base):
     audit_companies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     old_names: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Priority/lead score derived from Zefix data alone (0-100)
+    zefix_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Geocoded coordinates (from Nominatim, based on the Zefix address)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -276,9 +276,10 @@ td {
   font-size: 0.8rem;
 }
 
-.score-high { background: #d4f1e3; color: #145c35; }
-.score-mid  { background: #fef3cd; color: #7a5200; }
-.score-low  { background: #fde8e8; color: #7f1f1f; }
+.score-high  { background: #d4f1e3; color: #145c35; }
+.score-mid   { background: #fef3cd; color: #7a5200; }
+.score-low   { background: #fde8e8; color: #7f1f1f; }
+.score-zefix { background: #dbeafe; color: #1e40af; }  /* blue — Zefix priority, not yet searched */
 
 /* ── Edit form ─────────────────────────────────────────────────────────────── */
 
@@ -437,6 +438,39 @@ details[open] > .section-toggle::before { content: "▼ "; }
 
 .note-edit-form textarea {
   width: 100%;
+}
+
+/* ── Background collection banner ─────────────────────────────────────────── */
+
+.collection-running-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #1e40af;
+}
+
+.collection-running-banner a {
+  color: #1e40af;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #93c5fd;
+  border-top-color: #1e40af;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 
 /* ── Misc helpers ──────────────────────────────────────────────────────────── */

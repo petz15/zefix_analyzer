@@ -16,6 +16,7 @@ from app.database import SessionLocal, get_db
 from app.services.collection import (
     bulk_import_zefix,
     enrich_company_website,
+    geocode_and_update_company,
     import_company_from_zefix_uid,
     initial_collect,
     run_batch_collect,
@@ -146,6 +147,8 @@ def ui_home(
             "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),
             "message": message,
             "error": error,
+            "active_task": getattr(request.app.state, "collection_task", None)
+                if _task_is_running(request.app.state) else None,
         },
     )
 
@@ -304,7 +307,8 @@ def zefix_refresh_company(company_id: int, db: Session = Depends(get_db)) -> Red
         return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
-        import_company_from_zefix_uid(db, company.uid)
+        updated, _ = import_company_from_zefix_uid(db, company.uid)
+        geocode_and_update_company(db, updated)
     except Exception as exc:  # noqa: BLE001
         return RedirectResponse(
             url=f"/ui/companies/{company_id}?error={quote_plus(str(exc))}",

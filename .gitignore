@@ -15,3 +15,5 @@ build/
 .ruff_cache/
 *.sqlite
 *.db
+data/plz_ch.tsv
+certs/*.pem

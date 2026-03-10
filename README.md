@@ -3,10 +3,13 @@
 Internal leads dashboard for Swiss registered companies. Bulk-imports the entire Zefix commercial register, runs Google Search to find each company's website, and provides a GUI to review, score, and track outreach.
 
 * **Zefix API** – bulk-import all ~700k companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html)), canton by canton with resume support
-* **Google Custom Search** – automatically find and score each company's website (0–100 match score)
-* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status
-* **Company detail** – view enriched data, pick best website from search results, add contact info and notes
+* **Serper.dev** – automatically find and score each company's website (0–100 match score)
+* **Zefix priority score** – score every company from Zefix data alone (legal form, capital, purpose, industry, proximity) so high-value companies are Google-searched first
+* **Offline geocoding** – Swiss PLZ → lat/lon lookup via GeoNames dataset (downloaded once, no API key); proximity to Muri bei Bern factored into the score
+* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status; shows a live banner when a collection job is running in the background
+* **Company detail** – view enriched data, pick best website from search results, add contact info and notes; "Refresh from Zefix" button re-fetches and geocodes on demand
 * **CSV export** – export any filtered view to CSV
+* **HTTPS** – Nginx reverse proxy with self-signed certificate (or swap in a CA-signed cert); HTTP auto-redirects to HTTPS
 * **PostgreSQL** – all data persisted in Postgres; DB indexes on all filter columns
 * **FastAPI + Jinja2** – server-rendered UI, no JS framework required
 
@@ -16,13 +19,18 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 
 ```bash
 cp .env.example .env
-# Edit .env: set GOOGLE_API_KEY and GOOGLE_CSE_ID
+# Edit .env: set SERPER_API_KEY and database credentials
+
+# Generate a self-signed TLS certificate (once)
+bash scripts/gen-certs.sh
 
 docker compose up --build
 ```
 
-GUI: <http://localhost:8000/ui>
-Health check: <http://localhost:8000/health>
+GUI: <https://localhost/ui>
+Health check: <https://localhost/health>
+
+> **HTTP is redirected to HTTPS automatically.** Browsers will show a self-signed certificate warning — add an exception or replace `certs/cert.pem` / `certs/key.pem` with a CA-signed certificate.
 
 ---
 
@@ -270,6 +278,78 @@ Migrations live in `alembic/versions/`. Current chain:
 | `0005` | App settings table (runtime-configurable Google quota) |
 | `0006` | Zefix administrative fields (ehraid, chid, legalSeatId, legalFormId/uid/shortName, sogcDate, deletionDate) |
 | `0007` | Extended Zefix detail fields (sogcPub, capital, headOffices, branchOffices, hasTakenOver, oldNames, cantonalExcerptWeb) |
+| `0008` | Zefix priority score column (`zefix_score`) |
+| `0009` | Geocoded coordinates columns (`lat`, `lon`) |
+
+---
+
+## Scoring
+
+Two independent scores drive the workflow:
+
+### Zefix priority score (0–100, shown in blue)
+
+Computed from Zefix register data alone — no Google Search required. Used to order which companies get searched first during batch enrichment.
+
+| Component | Points |
+|---|---|
+| Legal form — AG/SA | +10 · GmbH/Sàrl +25 · Genossenschaft +20 · KG +15 · OG +12 · Stiftung +8 · Verein +5 · unknown +5 |
+| Capital nominal > 100 k | +10 · > 0 +5 |
+| Purpose text richness (≥ 20 words) | +10 · ≥ 8 words +5 |
+| Branch offices present | +10 |
+| Industry detected | +15 |
+| Location — canton tier | BE/SO +10 · AG +8 · BL/BS +6 · LU +5 · ZH +4 · all others −8 |
+| Location — distance to Muri bei Bern | ≤ 15 km +15 · ≤ 40 km +10 · ≤ 80 km +5 · ≤ 130 km 0 · > 130 km −5 |
+| Status not clearly active | −40 |
+
+Distance is computed with the Haversine formula. Coordinates come from the geocoded address when available, else municipality name lookup, else canton centroid.
+
+### Website match score (0–100, shown in green/yellow/red)
+
+Computed after Google Search against the best matching result. Factors: company name overlap in title/snippet, municipality and canton in result text, purpose keyword matches, legal form in domain, directory domain penalty.
+
+---
+
+## Geocoding
+
+Company addresses are geocoded offline using the [GeoNames Switzerland postal code dataset](https://download.geonames.org/export/zip/CH.zip) (CC BY 4.0, ~200 KB).
+
+- Downloaded automatically on first use and cached to `data/plz_ch.tsv` — no API key required
+- Geocoding extracts the 4-digit Swiss PLZ from the Zefix address string and maps it to the postal code centroid (~village-level accuracy, typically < 2 km)
+- Triggered during Zefix detail fetch runs and via the "↻ Refresh from Zefix" button on company detail pages
+- Once `lat`/`lon` are set, they are reused on subsequent imports without re-geocoding
+
+---
+
+## HTTPS setup
+
+A self-signed certificate is used by default. Generate it once:
+
+```bash
+bash scripts/gen-certs.sh             # CN=localhost
+bash scripts/gen-certs.sh myhost.local  # custom CN + SAN
+```
+
+This writes `certs/cert.pem` and `certs/key.pem` (git-ignored). Nginx mounts them and handles TLS termination; the FastAPI app runs on plain HTTP internally.
+
+To use a CA-signed certificate (e.g. from Let's Encrypt via Certbot), replace the two `.pem` files and restart the `nginx` container:
+
+```bash
+certbot certonly --standalone -d yourdomain.com
+cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem certs/cert.pem
+cp /etc/letsencrypt/live/yourdomain.com/privkey.pem   certs/key.pem
+docker compose restart nginx
+```
+
+---
+
+## Background collection
+
+All collection jobs (bulk import, batch enrichment, Zefix detail fetch, initial import) run in **background threads**. Navigating away from the Collection page does not stop or pause them.
+
+- The Collection page polls for progress every 3 seconds via `<meta http-equiv="refresh">`
+- The Dashboard shows a live blue banner with the current job label and status message while any job is running, and refreshes every 5 seconds
+- Only one job can run at a time; starting a second job while one is active is rejected with an error
 
 ---
 

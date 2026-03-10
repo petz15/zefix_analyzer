@@ -1,8 +1,21 @@
 services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
   app:
     build: .
-    ports:
-      - "8000:8000"
+    # Port 8000 is internal only — exposed through nginx above
+    expose:
+      - "8000"
     env_file:
       - .env
     environment:

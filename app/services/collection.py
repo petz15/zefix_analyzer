@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import crud
+from app.api.geocoding_client import geocode_address
 from app.api.google_search_client import search_website
 from app.config import settings
 from app.api.zefix_client import (
@@ -24,7 +25,7 @@ from app.api.zefix_client import (
 )
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
-from app.services.scoring import score_result
+from app.services.scoring import compute_zefix_score, score_result
 
 _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
     ("Technology", ["software", "informatik", "it-", " it ", "digital", "technologie", "saas", "cloud", "künstliche intelligenz", " ai ", " ki ", "automation", "programmier", "developer", "entwicklung von"]),
@@ -141,6 +142,19 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
     old_names = _json_field(raw.get("oldNames"))
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
+    industry = _derive_industry(purpose)
+    zefix_score = compute_zefix_score(
+        legal_form=legal_form_display,
+        legal_form_short_name=legal_form_short,
+        capital_nominal=capital_nominal,
+        purpose=purpose,
+        branch_offices=branch_offices,
+        industry=industry,
+        status=str(raw.get("status", "")) or None,
+        canton=raw.get("canton") or None,
+        municipality=raw.get("municipality") or raw.get("legalSeat") or None,
+    )
+
     return CompanyCreate(
         uid=uid_normalised,
         name=name,
@@ -153,7 +167,8 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
         canton=raw.get("canton") or None,
         purpose=purpose,
         address=address_str,
-        industry=_derive_industry(purpose),
+        industry=industry,
+        zefix_score=zefix_score,
         ehraid=ehraid,
         chid=chid,
         legal_seat_id=legal_seat_id,
@@ -192,6 +207,41 @@ def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]
 
     created = crud.create_company(db, company_data)
     return created, True
+
+
+def geocode_and_update_company(db: Session, company: Company) -> bool:
+    """Geocode the company's address and persist lat/lon + recompute zefix_score.
+
+    Skipped when the company has no address or coordinates are already set.
+
+    Returns:
+        True if coordinates were successfully obtained and saved.
+    """
+    if not company.address:
+        return False
+    if company.lat is not None and company.lon is not None:
+        return False
+
+    coords = geocode_address(company.address)
+    if coords is None:
+        return False
+
+    lat, lon = coords
+    new_score = compute_zefix_score(
+        legal_form=company.legal_form,
+        legal_form_short_name=company.legal_form_short_name,
+        capital_nominal=company.capital_nominal,
+        purpose=company.purpose,
+        branch_offices=company.branch_offices,
+        industry=company.industry,
+        status=company.status,
+        canton=company.canton,
+        municipality=company.municipality,
+        lat=lat,
+        lon=lon,
+    )
+    crud.update_company(db, company, CompanyUpdate(lat=lat, lon=lon, zefix_score=new_score))
+    return True
 
 
 def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tuple[bool, str | None]:
@@ -426,7 +476,7 @@ def bulk_import_zefix(
     # Fields that come exclusively from Zefix — safe to overwrite on every run
     _ZEFIX_UPDATE_FIELDS = {
         "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "purpose", "industry",
+        "status", "municipality", "canton", "purpose", "industry", "zefix_score",
         "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     }
 
@@ -451,6 +501,7 @@ def bulk_import_zefix(
             for result in results:
                 if not result.uid:
                     continue
+                _bulk_industry = _derive_industry(result.purpose)
                 company_data = CompanyCreate(
                     uid=result.uid,
                     name=result.name,
@@ -462,7 +513,18 @@ def bulk_import_zefix(
                     municipality=result.municipality,
                     canton=result.canton or canton,  # search was canton-scoped, so always known
                     purpose=result.purpose,
-                    industry=_derive_industry(result.purpose),
+                    industry=_bulk_industry,
+                    zefix_score=compute_zefix_score(
+                        legal_form=result.legal_form,
+                        legal_form_short_name=result.legal_form_short_name,
+                        capital_nominal=None,
+                        purpose=result.purpose,
+                        branch_offices=None,
+                        industry=_bulk_industry,
+                        status=result.status,
+                        canton=result.canton or canton,
+                        municipality=result.municipality,
+                    ),
                     ehraid=result.ehraid,
                     chid=result.chid,
                     legal_seat_id=result.legal_seat_id,
@@ -569,24 +631,37 @@ def run_zefix_detail_collect(
         "selected": 0,
         "updated": 0,
         "scored": 0,
+        "geocoded": 0,
         "errors": [],
     }
 
     run = crud.create_run(db, "detail")
 
     # ── Build target list ─────────────────────────────────────────────────────
+    # For query-based targeting, prioritise companies that have never received
+    # a full detail fetch (no purpose, no zefix_score, no zefix_raw) so that
+    # new/thin records are enriched before re-fetching already-detailed ones.
+    def _detail_priority_order(q):
+        """Order: un-detailed companies first, then by zefix_score desc."""
+        from sqlalchemy import case
+        has_detail = case(
+            (Company.zefix_raw.isnot(None), 1),
+            else_=0,
+        )
+        return q.order_by(has_detail.asc(), Company.zefix_score.desc().nullslast(), Company.id.asc())
+
     if uids:
         companies: list[Company] = [
             c for uid in uids if (c := crud.get_company_by_uid(db, uid)) is not None
         ]
     elif cantons:
         companies = (
-            db.query(Company)
-            .filter(Company.canton.in_(cantons))
-            .all()
+            _detail_priority_order(
+                db.query(Company).filter(Company.canton.in_(cantons))
+            ).all()
         )
     else:
-        companies = db.query(Company).all()
+        companies = _detail_priority_order(db.query(Company)).all()
 
     stats["selected"] = len(companies)
     total = len(companies)
@@ -595,6 +670,10 @@ def run_zefix_detail_collect(
         try:
             updated, _ = import_company_from_zefix_uid(db, company.uid)
             stats["updated"] += 1
+
+            # Geocode address → lat/lon (skipped if already set; Nominatim rate-limits itself)
+            if geocode_and_update_company(db, updated):
+                stats["geocoded"] += 1
 
             # Re-score only when no score exists yet and stored results are available
             if score_if_missing and updated.website_match_score is None:
@@ -648,7 +727,7 @@ def run_batch_collect(
         elif limit > available:
             limit = available
 
-    query = db.query(Company).order_by(Company.id.asc())
+    query = db.query(Company).order_by(Company.zefix_score.desc().nullslast(), Company.id.asc())
     if only_missing_website:
         query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
 
