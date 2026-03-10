@@ -14,7 +14,7 @@ from sqlalchemy import inspect as sa_inspect
 
 from app.database import Base, engine
 from app.services.scoring import get_default_scoring_config
-from app.ui.routes import router as ui_router
+from app.ui.routes import kick_job_worker, router as ui_router
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -116,6 +116,24 @@ def _seed_settings(app_state) -> None:
         raise RuntimeError(f"Failed to seed settings: {exc}") from exc
 
 
+def _recover_jobs_and_start_worker(app, app_state) -> None:
+    """Requeue interrupted jobs and ensure queued jobs resume on startup."""
+    from app.crud import list_active_jobs, requeue_interrupted_jobs
+    from app.database import SessionLocal
+
+    app_state.startup_message = "Recovering background jobs…"
+    try:
+        with SessionLocal() as db:
+            recovered = requeue_interrupted_jobs(db)
+            active_count = len(list_active_jobs(db))
+        kick_job_worker(app)
+        app_state.startup_message = (
+            f"Background jobs ready — recovered {recovered}, active {active_count}"
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to recover background jobs: {exc}") from exc
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -132,6 +150,7 @@ async def lifespan(app: FastAPI):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, _run_migrations, app.state)
             await loop.run_in_executor(None, _seed_settings, app.state)
+            await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001

@@ -31,6 +31,7 @@ from app.crud.job_run import (
     mark_completed,
     mark_failed,
     mark_running,
+    requeue_interrupted_jobs,
     update_progress,
 )
 
@@ -70,6 +71,7 @@ __all__ = [
     "list_jobs",
     "list_events",
     "mark_running",
+    "requeue_interrupted_jobs",
     "mark_cancel_requested",
     "mark_cancelled",
     "update_progress",

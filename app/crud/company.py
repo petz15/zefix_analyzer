@@ -12,6 +12,12 @@ _SORT_MAP = {
     "-name":        (Company.name,               False),
     "score":        (Company.website_match_score, True),
     "-score":       (Company.website_match_score, False),
+    "google_score":  (Company.website_match_score, True),
+    "-google_score": (Company.website_match_score, False),
+    "zefix_score":   (Company.zefix_score, True),
+    "-zefix_score":  (Company.zefix_score, False),
+    "industry":      (Company.industry, True),
+    "-industry":     (Company.industry, False),
     "canton":       (Company.canton,             True),
     "-canton":      (Company.canton,             False),
     "updated":      (Company.updated_at,         True),
@@ -31,7 +37,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
-                   google_searched, min_score, industry, tags):
+                   google_searched, min_score, min_google_score, min_zefix_score, industry, tags):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -50,6 +56,10 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.website_checked_at.is_(None))
     if min_score is not None:
         query = query.filter(Company.website_match_score >= min_score)
+    if min_google_score is not None:
+        query = query.filter(Company.website_match_score >= min_google_score)
+    if min_zefix_score is not None:
+        query = query.filter(Company.zefix_score >= min_zefix_score)
     if industry:
         query = query.filter(Company.industry.ilike(f"%{industry}%"))
     if tags:
@@ -68,6 +78,8 @@ def list_companies(
     proposal_status: str | None = None,
     google_searched: bool | None = None,
     min_score: int | None = None,
+    min_google_score: int | None = None,
+    min_zefix_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
     # kept for backward-compat with collection.py batch query
@@ -83,6 +95,8 @@ def list_companies(
         proposal_status=proposal_status,
         google_searched=google_searched,
         min_score=min_score,
+        min_google_score=min_google_score,
+        min_zefix_score=min_zefix_score,
         industry=industry,
         tags=tags,
     )
@@ -106,6 +120,8 @@ def count_companies(
     proposal_status: str | None = None,
     google_searched: bool | None = None,
     min_score: int | None = None,
+    min_google_score: int | None = None,
+    min_zefix_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
 ) -> int:
@@ -118,6 +134,8 @@ def count_companies(
         proposal_status=proposal_status,
         google_searched=google_searched,
         min_score=min_score,
+        min_google_score=min_google_score,
+        min_zefix_score=min_zefix_score,
         industry=industry,
         tags=tags,
     )

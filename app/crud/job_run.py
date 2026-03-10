@@ -57,6 +57,24 @@ def get_next_queued_job(db: Session) -> JobRun | None:
     )
 
 
+def requeue_interrupted_jobs(
+    db: Session,
+    *,
+    message: str = "Recovered after application restart",
+) -> int:
+    """Move interrupted running jobs back to queued so they can resume."""
+    jobs = db.query(JobRun).filter(JobRun.status == "running").all()
+    for job in jobs:
+        job.status = "queued"
+        job.started_at = None
+        job.completed_at = None
+        job.message = message
+        job.error = None
+    if jobs:
+        db.commit()
+    return len(jobs)
+
+
 def mark_running(db: Session, job: JobRun, *, message: str) -> JobRun:
     job.status = "running"
     job.cancel_requested = False

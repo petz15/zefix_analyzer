@@ -122,7 +122,15 @@
         </select>
       </label>
       <label class="form-label">
-        <span>Min score</span>
+        <span>Min Google score</span>
+        <input type="number" name="min_google_score" value="{{ f_min_google_score }}" min="0" max="100" placeholder="0-100">
+      </label>
+      <label class="form-label">
+        <span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" value="{{ f_min_zefix_score }}" min="0" max="100" placeholder="0-100">
+      </label>
+      <label class="form-label">
+        <span>Min score (legacy)</span>
         <input type="number" name="min_score" value="{{ f_min_score }}" min="0" max="100" placeholder="0–100">
       </label>
       <label class="form-label">
@@ -132,10 +140,16 @@
           <option value="updated"   {% if sort == 'updated'   %}selected{% endif %}>Last updated ↑</option>
           <option value="-created"  {% if sort == '-created'  %}selected{% endif %}>Created ↓</option>
           <option value="created"   {% if sort == 'created'   %}selected{% endif %}>Created ↑</option>
-          <option value="-score"    {% if sort == '-score'    %}selected{% endif %}>Score ↓</option>
-          <option value="score"     {% if sort == 'score'     %}selected{% endif %}>Score ↑</option>
+          <option value="-google_score" {% if sort == '-google_score' %}selected{% endif %}>Google score ↓</option>
+          <option value="google_score"  {% if sort == 'google_score'  %}selected{% endif %}>Google score ↑</option>
+          <option value="-zefix_score"  {% if sort == '-zefix_score'  %}selected{% endif %}>Zefix score ↓</option>
+          <option value="zefix_score"   {% if sort == 'zefix_score'   %}selected{% endif %}>Zefix score ↑</option>
+          <option value="-score"        {% if sort == '-score'        %}selected{% endif %}>Score ↓ (legacy)</option>
+          <option value="score"         {% if sort == 'score'         %}selected{% endif %}>Score ↑ (legacy)</option>
           <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
           <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
+          <option value="industry"  {% if sort == 'industry'  %}selected{% endif %}>Industry A→Z</option>
+          <option value="-industry" {% if sort == '-industry' %}selected{% endif %}>Industry Z→A</option>
           <option value="canton"    {% if sort == 'canton'    %}selected{% endif %}>Canton A→Z</option>
           <option value="-canton"   {% if sort == '-canton'   %}selected{% endif %}>Canton Z→A</option>
         </select>
@@ -167,13 +181,19 @@
               <span class="sort-icon">{% if sort == 'canton' %}↑{% elif sort == '-canton' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th>Status</th>
-            <th>Industry</th>
-            <th>Website</th>
-            <th class="th-sortable" onclick="toggleSort('score')" title="Sort by score">
-              Google Score
-              <span class="sort-icon">{% if sort == 'score' %}↑{% elif sort == '-score' %}↓{% else %}↕{% endif %}</span>
+            <th class="th-sortable" onclick="toggleSort('industry')" title="Sort by industry">
+              Industry
+              <span class="sort-icon">{% if sort == 'industry' %}↑{% elif sort == '-industry' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th>Zefix Score</th>
+            <th>Website</th>
+            <th class="th-sortable" onclick="toggleSort('google_score')" title="Sort by Google score">
+              Google Score
+              <span class="sort-icon">{% if sort == 'google_score' or sort == 'score' %}↑{% elif sort == '-google_score' or sort == '-score' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by Zefix score">
+              Zefix Score
+              <span class="sort-icon">{% if sort == 'zefix_score' %}↑{% elif sort == '-zefix_score' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th>Review</th>
             <th>Proposal</th>
             <th></th>
@@ -290,8 +310,8 @@
     } else if (cur === '-' + field) {
       sortSelect.value = field;
     } else {
-      // Default: descending for score/updated, ascending for name/canton
-      sortSelect.value = (field === 'name' || field === 'canton') ? field : '-' + field;
+      // Default: descending for score fields/updated, ascending for text fields.
+      sortSelect.value = (field === 'name' || field === 'canton' || field === 'industry') ? field : '-' + field;
     }
     form.submit();
   }
