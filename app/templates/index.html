@@ -133,6 +133,10 @@
         <input type="number" name="min_zefix_score" value="{{ f_min_zefix_score }}" min="0" max="100" placeholder="0-100">
       </label>
       <label class="form-label">
+        <span>Min Claude score</span>
+        <input type="number" name="min_claude_score" value="{{ f_min_claude_score }}" min="0" max="100" placeholder="0-100">
+      </label>
+      <label class="form-label">
         <span>Sort by</span>
         <select name="sort">
           <option value="-updated"  {% if sort == '-updated'  %}selected{% endif %}>Last updated ↓</option>
@@ -143,6 +147,8 @@
           <option value="google_score"  {% if sort == 'google_score'  %}selected{% endif %}>Google score ↑</option>
           <option value="-zefix_score"  {% if sort == '-zefix_score'  %}selected{% endif %}>Zefix score ↓</option>
           <option value="zefix_score"   {% if sort == 'zefix_score'   %}selected{% endif %}>Zefix score ↑</option>
+          <option value="-claude_score" {% if sort == '-claude_score' %}selected{% endif %}>Claude score ↓</option>
+          <option value="claude_score"  {% if sort == 'claude_score'  %}selected{% endif %}>Claude score ↑</option>
           <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
           <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
           <option value="industry"  {% if sort == 'industry'  %}selected{% endif %}>Industry A→Z</option>
@@ -165,8 +171,27 @@
 {# ── Leads table ──────────────────────────────────────────────────────────── #}
 <section class="card">
 
+    <div class="col-picker-bar">
+      <div class="col-picker-wrap">
+        <button type="button" class="secondary-btn" id="col-picker-btn" onclick="toggleColPicker()">Columns ▾</button>
+        <div class="col-picker-dropdown" id="col-picker-dropdown" hidden>
+          <div class="col-picker-title">Show / hide columns</div>
+          <label><input type="checkbox" data-col="1" checked> Canton</label>
+          <label><input type="checkbox" data-col="2" checked> Status</label>
+          <label><input type="checkbox" data-col="3" checked> Industry</label>
+          <label><input type="checkbox" data-col="4" checked> Website</label>
+          <label><input type="checkbox" data-col="5" checked> Google Score</label>
+          <label><input type="checkbox" data-col="6" checked> Zefix Score</label>
+          <label><input type="checkbox" data-col="7" checked> Claude Score</label>
+          <label><input type="checkbox" data-col="8" checked> Review</label>
+          <label><input type="checkbox" data-col="9" checked> Proposal</label>
+          <label><input type="checkbox" data-col="10" checked> Open</label>
+        </div>
+      </div>
+    </div>
+
     <div class="table-wrap">
-      <table>
+      <table id="leads-table">
         <thead>
           <tr>
             <th class="th-sortable" onclick="toggleSort('name')" title="Sort by name">
@@ -190,6 +215,10 @@
             <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by Zefix score">
               Zefix Score
               <span class="sort-icon">{% if sort == 'zefix_score' %}↑{% elif sort == '-zefix_score' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('claude_score')" title="Sort by Claude score">
+              Claude Score
+              <span class="sort-icon">{% if sort == 'claude_score' %}↑{% elif sort == '-claude_score' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th>Review</th>
             <th>Proposal</th>
@@ -242,6 +271,15 @@
               {% endif %}
             </td>
             <td>
+              {% if c.claude_score is not none %}
+                <span class="score-pill-sm {% if c.claude_score >= 70 %}score-high{% elif c.claude_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Claude classification score{% if c.claude_category %}: {{ c.claude_category }}{% endif %}">
+                  {{ c.claude_score }}
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
               <select class="status-select" data-company-id="{{ c.id }}" data-field="review_status"
                       data-original="{{ c.review_status or '' }}">
                 <option value=""            {% if not c.review_status                     %}selected{% endif %}>pending</option>
@@ -264,7 +302,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="10" class="empty-row">No companies match the current filters.</td>
+            <td colspan="11" class="empty-row">No companies match the current filters.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -334,6 +372,58 @@
   });
 </script>
 
+<script>
+  // ── Column picker ──────────────────────────────────────────────────────────
+  var COL_KEY = 'dashboard_col_visibility';
+
+  function applyColVisibility() {
+    var table = document.getElementById('leads-table');
+    if (!table) return;
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(COL_KEY) || '{}'); } catch(e) {}
+    document.querySelectorAll('#col-picker-dropdown input[data-col]').forEach(function(cb) {
+      var idx = parseInt(cb.dataset.col, 10);
+      var visible = idx in saved ? saved[idx] : true;
+      cb.checked = visible;
+      setColVisible(table, idx, visible);
+    });
+  }
+
+  function setColVisible(table, idx, visible) {
+    table.querySelectorAll('tr').forEach(function(row) {
+      var cell = row.cells[idx];
+      if (cell) cell.style.display = visible ? '' : 'none';
+    });
+  }
+
+  function toggleColPicker() {
+    var dd = document.getElementById('col-picker-dropdown');
+    dd.hidden = !dd.hidden;
+  }
+
+  document.addEventListener('click', function(e) {
+    var wrap = document.querySelector('.col-picker-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('col-picker-dropdown').hidden = true;
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    applyColVisibility();
+    document.querySelectorAll('#col-picker-dropdown input[data-col]').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        var table = document.getElementById('leads-table');
+        var idx = parseInt(this.dataset.col, 10);
+        setColVisible(table, idx, this.checked);
+        var saved = {};
+        try { saved = JSON.parse(localStorage.getItem(COL_KEY) || '{}'); } catch(e) {}
+        saved[idx] = this.checked;
+        localStorage.setItem(COL_KEY, JSON.stringify(saved));
+      });
+    });
+  });
+</script>
+
 <style>
   .th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
   .th-sortable:hover { background: var(--hover, rgba(0,0,0,0.04)); }
@@ -346,6 +436,51 @@
     transition: background 0.15s;
   }
   .stat-item--link:hover { background: var(--hover, rgba(0,0,0,0.05)); }
+
+  /* Column picker */
+  .col-picker-bar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.6rem;
+  }
+  .col-picker-wrap {
+    position: relative;
+  }
+  .col-picker-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 10%);
+    padding: 0.7rem 1rem;
+    min-width: 160px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .col-picker-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+  }
+  .col-picker-dropdown label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .col-picker-dropdown label input {
+    width: auto;
+    cursor: pointer;
+  }
 </style>
 
 {% endblock %}

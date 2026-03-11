@@ -51,6 +51,9 @@ class CompanyBase(BaseModel):
     zefix_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
+    tfidf_cluster: str | None = None
+    claude_score: int | None = None
+    claude_category: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -107,6 +110,10 @@ class CompanyUpdate(BaseModel):
     zefix_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
+    tfidf_cluster: str | None = None
+    claude_score: int | None = None
+    claude_category: str | None = None
+    claude_scored_at: datetime | None = None
 
 
 class CompanyRead(CompanyBase):

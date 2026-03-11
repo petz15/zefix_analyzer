@@ -15,6 +15,7 @@ from app.api.zefix_client import SWISS_CANTONS
 from app.database import SessionLocal, get_db
 from app.services.collection import (
     bulk_import_zefix,
+    claude_classify_batch,
     enrich_company_website,
     geocode_and_update_company,
     import_company_from_zefix_uid,
@@ -22,8 +23,10 @@ from app.services.collection import (
     re_geocode_all_companies,
     recalculate_google_scores,
     recalculate_zefix_scores,
+    rederive_industry_batch,
     run_batch_collect,
     run_zefix_detail_collect,
+    tfidf_classify_batch,
 )
 from app.services.scoring import get_default_scoring_config
 from app.schemas.company import CompanyUpdate
@@ -56,6 +59,7 @@ def _filter_params(
     sort: str | None,
     industry: str | None,
     tags: str | None,
+    min_claude_score: int | None = None,
 ) -> dict:
     """Build a dict of non-empty filter params for URL construction."""
     p: dict = {}
@@ -73,6 +77,8 @@ def _filter_params(
         p["min_google_score"] = min_google_score
     if min_zefix_score is not None:
         p["min_zefix_score"] = min_zefix_score
+    if min_claude_score is not None:
+        p["min_claude_score"] = min_claude_score
     if sort:
         p["sort"] = sort
     if industry:
@@ -102,6 +108,7 @@ def ui_home(
     google_searched: str | None = Query(None),
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
+    min_claude_score: str | None = Query(None),
     industry: str | None = Query(None),
     tags: str | None = Query(None),
     sort: str | None = Query(None),
@@ -113,6 +120,7 @@ def ui_home(
     _ensure_job_worker(request.app)
     min_google_score_int: int | None = int(min_google_score) if min_google_score and min_google_score.strip().lstrip("-").isdigit() else None
     min_zefix_score_int: int | None = int(min_zefix_score) if min_zefix_score and min_zefix_score.strip().lstrip("-").isdigit() else None
+    min_claude_score_int: int | None = int(min_claude_score) if min_claude_score and min_claude_score.strip().lstrip("-").isdigit() else None
     searched_filter = _searched_bool(google_searched)
     filter_kwargs = dict(
         name_filter=q or None,
@@ -122,6 +130,7 @@ def ui_home(
         google_searched=searched_filter,
         min_google_score=min_google_score_int,
         min_zefix_score=min_zefix_score_int,
+        min_claude_score=min_claude_score_int,
         industry=industry or None,
         tags=tags or None,
     )
@@ -135,7 +144,7 @@ def ui_home(
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
                         google_searched, min_google_score_int, min_zefix_score_int,
-                        sort, industry, tags)
+                        sort, industry, tags, min_claude_score_int)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
     return templates.TemplateResponse(
@@ -160,6 +169,7 @@ def ui_home(
             "f_google_searched": google_searched or "",
             "f_min_google_score": min_google_score_int if min_google_score_int is not None else "",
             "f_min_zefix_score": min_zefix_score_int if min_zefix_score_int is not None else "",
+            "f_min_claude_score": min_claude_score_int if min_claude_score_int is not None else "",
             "f_industry": industry or "",
             "f_tags": tags or "",
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
@@ -720,6 +730,11 @@ def ui_settings(
             "zefix_treuhand_consulting_penalty": current.get("zefix_treuhand_consulting_penalty", "15"),
             "zefix_inactive_status_penalty": current.get("zefix_inactive_status_penalty", "40"),
             "zefix_force_zero_status_terms": current.get("zefix_force_zero_status_terms", "being_cancelled"),
+            "zefix_target_keywords": current.get("zefix_target_keywords", ""),
+            "zefix_excluded_keywords": current.get("zefix_excluded_keywords", "treuhand,consulting"),
+            "industry_taxonomy": current.get("industry_taxonomy", ""),
+            "anthropic_api_key": current.get("anthropic_api_key", ""),
+            "claude_classify_prompt": current.get("claude_classify_prompt", ""),
             "message": message,
             "error": error,
             "active_task": active_task,
@@ -737,6 +752,11 @@ def save_settings(
     zefix_treuhand_consulting_penalty: str = Form("15"),
     zefix_inactive_status_penalty: str = Form("40"),
     zefix_force_zero_status_terms: str = Form("being_cancelled"),
+    zefix_target_keywords: str = Form(""),
+    zefix_excluded_keywords: str = Form("treuhand,consulting"),
+    industry_taxonomy: str = Form(""),
+    anthropic_api_key: str = Form(""),
+    claude_classify_prompt: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     crud.set_setting(db, "google_search_enabled", "true" if google_search_enabled == "true" else "false")
@@ -749,13 +769,20 @@ def save_settings(
         "zefix_treuhand_consulting_penalty": zefix_treuhand_consulting_penalty,
         "zefix_inactive_status_penalty": zefix_inactive_status_penalty,
         "zefix_force_zero_status_terms": zefix_force_zero_status_terms,
+        "zefix_target_keywords": zefix_target_keywords,
+        "zefix_excluded_keywords": zefix_excluded_keywords,
     }
     for key, value in score_fields.items():
-        if key == "zefix_force_zero_status_terms":
-            cleaned = value.strip() or defaults[key]
+        if key in ("zefix_force_zero_status_terms", "zefix_target_keywords", "zefix_excluded_keywords"):
+            cleaned = value.strip()
         else:
             cleaned = str(int(value)) if value.strip().lstrip("-").isdigit() else defaults[key]
         crud.set_setting(db, key, cleaned)
+
+    # Free-text / API settings
+    crud.set_setting(db, "industry_taxonomy", industry_taxonomy.strip())
+    crud.set_setting(db, "anthropic_api_key", anthropic_api_key.strip())
+    crud.set_setting(db, "claude_classify_prompt", claude_classify_prompt.strip())
 
     return RedirectResponse(
         url=f"/ui/settings?message={quote_plus('Settings saved')}",
@@ -820,6 +847,107 @@ def start_re_geocode(request: Request, db: Session = Depends(get_db)) -> Redirec
         url=f"/ui/settings?message={quote_plus(f'Re-geocode job queued (job #{job.id})')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+# ── Classification batch jobs ─────────────────────────────────────────────────
+
+def _parse_optional_int(val: str | None) -> int | None:
+    if val and val.strip().lstrip("-").isdigit():
+        return int(val.strip())
+    return None
+
+
+@router.post("/ui/classify/rederive-industry", include_in_schema=False)
+def start_rederive_industry(
+    request: Request,
+    canton: str = Form(""),
+    industry_filter: str = Form(""),
+    min_zefix_score: str = Form(""),
+    limit: str = Form(""),
+) -> RedirectResponse:
+    params: dict = {}
+    if canton.strip():
+        params["canton"] = canton.strip()
+    if industry_filter.strip():
+        params["industry_filter"] = industry_filter.strip()
+    v = _parse_optional_int(min_zefix_score)
+    if v is not None:
+        params["min_zefix_score"] = v
+    lv = _parse_optional_int(limit)
+    if lv is not None:
+        params["limit"] = lv
+
+    label = "Re-derive industry labels"
+    if params.get("canton"):
+        label += f" [{params['canton']}]"
+
+    job, err = _enqueue_job_safe(request, job_type="rederive_industry", label=label, params=params)
+    if err:
+        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'Industry re-derivation queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/classify/tfidf", include_in_schema=False)
+def start_tfidf_classify(
+    request: Request,
+    canton: str = Form(""),
+    industry_filter: str = Form(""),
+    min_zefix_score: str = Form(""),
+    max_zefix_score: str = Form(""),
+    limit: str = Form("1000"),
+    n_clusters: str = Form("10"),
+) -> RedirectResponse:
+    params: dict = {
+        "limit": _parse_optional_int(limit) or 1000,
+        "n_clusters": _parse_optional_int(n_clusters) or 10,
+    }
+    if canton.strip():
+        params["canton"] = canton.strip()
+    if industry_filter.strip():
+        params["industry_filter"] = industry_filter.strip()
+    v = _parse_optional_int(min_zefix_score)
+    if v is not None:
+        params["min_zefix_score"] = v
+    v2 = _parse_optional_int(max_zefix_score)
+    if v2 is not None:
+        params["max_zefix_score"] = v2
+
+    label = f"TF-IDF cluster ({params['limit']} companies, {params['n_clusters']} clusters)"
+    job, err = _enqueue_job_safe(request, job_type="tfidf_classify", label=label, params=params)
+    if err:
+        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'TF-IDF clustering queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/classify/claude", include_in_schema=False)
+def start_claude_classify(
+    request: Request,
+    canton: str = Form(""),
+    industry_filter: str = Form(""),
+    min_zefix_score: str = Form(""),
+    max_zefix_score: str = Form(""),
+    limit: str = Form("500"),
+    system_prompt: str = Form(""),
+) -> RedirectResponse:
+    params: dict = {"limit": _parse_optional_int(limit) or 500}
+    if canton.strip():
+        params["canton"] = canton.strip()
+    if industry_filter.strip():
+        params["industry_filter"] = industry_filter.strip()
+    v = _parse_optional_int(min_zefix_score)
+    if v is not None:
+        params["min_zefix_score"] = v
+    v2 = _parse_optional_int(max_zefix_score)
+    if v2 is not None:
+        params["max_zefix_score"] = v2
+    if system_prompt.strip():
+        params["system_prompt"] = system_prompt.strip()
+
+    label = f"Claude classify ({params['limit']} companies)"
+    job, err = _enqueue_job_safe(request, job_type="claude_classify", label=label, params=params)
+    if err:
+        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'Claude classification queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ── Collection ────────────────────────────────────────────────────────────────
@@ -1015,6 +1143,72 @@ def _run_job(app, job_id: int) -> None:
                 done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
+            elif job.job_type == "rederive_industry":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Re-derived {done}/{total} — {stats['updated']} changed, {stats['unchanged']} unchanged"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = rederive_industry_batch(
+                    db,
+                    canton=params.get("canton") or None,
+                    industry_filter=params.get("industry_filter") or None,
+                    min_zefix_score=params.get("min_zefix_score"),
+                    limit=params.get("limit") or None,
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['updated']} updated, {stats['unchanged']} unchanged, {len(stats['errors'])} errors"
+
+            elif job.job_type == "tfidf_classify":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Clustered {done}/{total} — {stats['classified']} labelled"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = tfidf_classify_batch(
+                    db,
+                    canton=params.get("canton") or None,
+                    industry_filter=params.get("industry_filter") or None,
+                    min_zefix_score=params.get("min_zefix_score"),
+                    max_zefix_score=params.get("max_zefix_score"),
+                    limit=int(params.get("limit", 1000)),
+                    n_clusters=int(params.get("n_clusters", 10)),
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['classified']} clustered, {stats['skipped']} skipped, {len(stats['errors'])} errors"
+
+            elif job.job_type == "claude_classify":
+                from app.config import settings as app_settings
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)
+                    msg = f"Classified {done}/{total} — {stats['classified']} scored, ~{tokens} tokens used"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = claude_classify_batch(
+                    db,
+                    canton=params.get("canton") or None,
+                    industry_filter=params.get("industry_filter") or None,
+                    min_zefix_score=params.get("min_zefix_score"),
+                    max_zefix_score=params.get("max_zefix_score"),
+                    limit=int(params.get("limit", 500)),
+                    system_prompt=params.get("system_prompt") or None,
+                    api_key=crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key,
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                )
+                tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)
+                done_msg = f"Done — {stats['classified']} classified, {stats['skipped']} skipped, ~{tokens} tokens, {len(stats['errors'])} errors"
+
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")
 

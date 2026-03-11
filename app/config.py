@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     google_daily_quota: int = 100
 
+    anthropic_api_key: str = ""
 
 
 settings = Settings()

@@ -132,7 +132,46 @@
         <small class="muted">Comma-separated normalized terms. If status contains one term, score is forced to 0.</small>
       </label>
 
+      <label class="form-label">
+        <span>Zefix score: Target keywords</span>
+        <input type="text" name="zefix_target_keywords" value="{{ zefix_target_keywords }}" placeholder="e.g. software, IT, digital, saas">
+        <small class="muted">Comma-separated words. 1 hit in purpose or industry → +½ industry bonus. 2+ hits → +full industry bonus.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Excluded keywords</span>
+        <input type="text" name="zefix_excluded_keywords" value="{{ zefix_excluded_keywords }}" placeholder="e.g. treuhand, consulting, holding">
+        <small class="muted">Comma-separated words. Any hit in purpose or industry → −consulting penalty. Replaces the hardcoded treuhand/consulting check.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Anthropic API key</span>
+        <input type="password" name="anthropic_api_key" value="{{ anthropic_api_key }}" placeholder="sk-ant-…" autocomplete="off">
+        <small class="muted">Required for Claude classification jobs. Also readable from the <code>ANTHROPIC_API_KEY</code> environment variable.</small>
+      </label>
+
     </div>
+
+    <details style="margin-bottom: 0.8rem;">
+      <summary class="section-toggle">Industry taxonomy (optional — overrides built-in keyword lists)</summary>
+      <div style="margin-top: 0.7rem;">
+        <p class="muted-hint">One category per line: <code>Category Name: keyword1, keyword2, keyword3</code><br>
+          Leave empty to use the built-in 13-category defaults. Keywords are matched case-insensitively as substrings.
+          Best-match wins (most keyword hits), so order doesn't matter.</p>
+        <textarea name="industry_taxonomy" rows="14" style="width:100%; font-family: monospace; font-size: 0.85rem;"
+                  placeholder="Technology: software, informatik, it-, digital, saas&#10;Finance: finanz, buchhaltung, steuer&#10;Consulting: beratung, consulting, strategie&#10;…">{{ industry_taxonomy }}</textarea>
+      </div>
+    </details>
+
+    <details style="margin-bottom: 0.8rem;">
+      <summary class="section-toggle">Claude classification prompt (optional)</summary>
+      <div style="margin-top: 0.7rem;">
+        <p class="muted-hint">System prompt sent to Claude Haiku for each company. Leave empty to use the built-in default.
+          The model must output <strong>only</strong> a JSON object with <code>"score"</code> (0-100) and <code>"category"</code>.</p>
+        <textarea name="claude_classify_prompt" rows="7" style="width:100%; font-family: monospace; font-size: 0.85rem;"
+                  placeholder="You are evaluating Swiss company entries as B2B leads…">{{ claude_classify_prompt }}</textarea>
+      </div>
+    </details>
 
     <button type="submit">Save settings</button>
     <a class="button-link secondary" href="/ui" style="margin-left: 0.5rem;">Cancel</a>
@@ -160,6 +199,86 @@
       Run this after the building DB has been built or if map coordinates look inaccurate.
     </p>
     <button type="submit">Re-geocode all companies</button>
+  </form>
+
+  <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
+  <h3 style="margin-bottom:0.5rem;">Industry classification</h3>
+
+  <form method="post" action="/ui/classify/rederive-industry">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Re-derive the <code>industry</code> label for existing companies using the current taxonomy and
+      best-match scoring. Recomputes <code>zefix_score</code> when the label changes.
+    </p>
+    <div class="filter-grid" style="margin-bottom:0.6rem;">
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+      </label>
+      <label class="form-label"><span>Current industry filter</span>
+        <input type="text" name="industry_filter" placeholder="e.g. Consulting">
+      </label>
+      <label class="form-label"><span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" placeholder="0-100">
+      </label>
+      <label class="form-label"><span>Limit (companies)</span>
+        <input type="number" name="limit" placeholder="leave empty = all">
+      </label>
+    </div>
+    <button type="submit">Re-derive industry labels</button>
+  </form>
+
+  <form method="post" action="/ui/classify/tfidf" style="margin-top:1rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Cluster companies by TF-IDF similarity of their purpose text. Stores a human-readable
+      <code>tfidf_cluster</code> label (top-3 terms) on each matched company. No API calls — runs locally.
+      Requires <code>scikit-learn</code>.
+    </p>
+    <div class="filter-grid" style="margin-bottom:0.6rem;">
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. ZH (leave empty = all)">
+      </label>
+      <label class="form-label"><span>Industry filter</span>
+        <input type="text" name="industry_filter" placeholder="e.g. Technology">
+      </label>
+      <label class="form-label"><span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" placeholder="0-100">
+      </label>
+      <label class="form-label"><span>Max Zefix score</span>
+        <input type="number" name="max_zefix_score" placeholder="0-100">
+      </label>
+      <label class="form-label"><span>Max companies</span>
+        <input type="number" name="limit" value="1000">
+      </label>
+      <label class="form-label"><span>Number of clusters</span>
+        <input type="number" name="n_clusters" value="10" min="2" max="50">
+      </label>
+    </div>
+    <button type="submit">Run TF-IDF clustering</button>
+  </form>
+
+  <form method="post" action="/ui/classify/claude" style="margin-top:1rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
+      <code>claude_category</code> per company. Requires an Anthropic API key (set above).
+      Approximate cost: ~$0.25 per 1 000 companies.
+    </p>
+    <div class="filter-grid" style="margin-bottom:0.6rem;">
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+      </label>
+      <label class="form-label"><span>Industry filter</span>
+        <input type="text" name="industry_filter" placeholder="e.g. Technology">
+      </label>
+      <label class="form-label"><span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" placeholder="0-100">
+      </label>
+      <label class="form-label"><span>Max Zefix score</span>
+        <input type="number" name="max_zefix_score" placeholder="0-100">
+      </label>
+      <label class="form-label"><span>Max companies</span>
+        <input type="number" name="limit" value="500">
+      </label>
+    </div>
+    <button type="submit">Run Claude classification</button>
   </form>
 </section>
 {% endblock %}

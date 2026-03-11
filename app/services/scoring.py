@@ -366,6 +366,11 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     "zefix_treuhand_consulting_penalty": "15",
     "zefix_inactive_status_penalty": "40",
     "zefix_force_zero_status_terms": "being_cancelled",
+    # Comma-separated words. Any hit in purpose OR industry → +industry_bonus pts.
+    "zefix_target_keywords": "",
+    # Comma-separated words. Any hit in purpose OR industry → -consulting_penalty pts.
+    # Replaces the hardcoded "treuhand/consulting" check and also covers purpose text.
+    "zefix_excluded_keywords": "treuhand,consulting",
 }
 
 
@@ -414,12 +419,16 @@ def compute_zefix_score_breakdown(
     inactive_penalty = _cfg_int(config, "zefix_inactive_status_penalty", 40)
     force_zero_terms = _cfg_terms(config, "zefix_force_zero_status_terms", ["being_cancelled"])
 
+    target_keywords = _cfg_terms(config, "zefix_target_keywords", [])
+    excluded_keywords = _cfg_terms(config, "zefix_excluded_keywords", ["treuhand", "consulting"])
+
     breakdown: dict[str, int | str | list[str] | bool] = {
         "legal_form": 0,
         "capital": 0,
         "purpose": 0,
         "branch_offices": 0,
         "industry_bonus": 0,
+        "keyword_match": 0,
         "industry_penalty": 0,
         "location": 0,
         "status_penalty": 0,
@@ -458,11 +467,23 @@ def compute_zefix_score_breakdown(
     if branch_offices and branch_offices not in ("null", "[]", ""):
         breakdown["branch_offices"] = 10
 
+    # Combined text for keyword matching (purpose + industry)
+    combined_kw = " ".join(filter(None, [purpose, industry])).lower()
+
     if industry:
         breakdown["industry_bonus"] = industry_bonus
-        ind = industry.lower()
-        if "treuhand" in ind or "consulting" in ind:
-            breakdown["industry_penalty"] = -consulting_penalty
+
+    # Target keyword match: purpose or industry contains a configured target word
+    if target_keywords:
+        hits = sum(1 for kw in target_keywords if kw in combined_kw)
+        if hits >= 2:
+            breakdown["keyword_match"] = industry_bonus
+        elif hits == 1:
+            breakdown["keyword_match"] = industry_bonus // 2
+
+    # Excluded keyword penalty: configurable list (replaces hardcoded treuhand/consulting)
+    if excluded_keywords and any(kw in combined_kw for kw in excluded_keywords):
+        breakdown["industry_penalty"] = -consulting_penalty
 
     breakdown["location"] = _location_score(canton, municipality, lat=lat, lon=lon)
 
@@ -477,6 +498,7 @@ def compute_zefix_score_breakdown(
         + int(breakdown["purpose"])
         + int(breakdown["branch_offices"])
         + int(breakdown["industry_bonus"])
+        + int(breakdown["keyword_match"])
         + int(breakdown["industry_penalty"])
         + int(breakdown["location"])
         + int(breakdown["status_penalty"])

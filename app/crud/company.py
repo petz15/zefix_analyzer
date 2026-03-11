@@ -12,8 +12,10 @@ _SORT_MAP = {
     "-name":        (Company.name,               False),
     "google_score":  (Company.website_match_score, True),
     "-google_score": (Company.website_match_score, False),
-    "zefix_score":   (Company.zefix_score, True),
-    "-zefix_score":  (Company.zefix_score, False),
+    "zefix_score":   (Company.zefix_score,  True),
+    "-zefix_score":  (Company.zefix_score,  False),
+    "claude_score":  (Company.claude_score, True),
+    "-claude_score": (Company.claude_score, False),
     "industry":      (Company.industry, True),
     "-industry":     (Company.industry, False),
     "canton":       (Company.canton,             True),
@@ -35,7 +37,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
-                   google_searched, min_google_score, min_zefix_score, industry, tags):
+                   google_searched, min_google_score, min_zefix_score, min_claude_score=None, industry, tags):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -61,6 +63,8 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.website_match_score >= min_google_score)
     if min_zefix_score is not None:
         query = query.filter(Company.zefix_score >= min_zefix_score)
+    if min_claude_score is not None:
+        query = query.filter(Company.claude_score >= min_claude_score)
     if industry:
         query = query.filter(Company.industry.ilike(f"%{industry}%"))
     if tags:
@@ -80,6 +84,7 @@ def list_companies(
     google_searched: str | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
+    min_claude_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
     # kept for backward-compat with collection.py batch query
@@ -96,6 +101,7 @@ def list_companies(
         google_searched=google_searched,
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
+        min_claude_score=min_claude_score,
         industry=industry,
         tags=tags,
     )
@@ -120,6 +126,7 @@ def count_companies(
     google_searched: str | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
+    min_claude_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
 ) -> int:
@@ -133,6 +140,7 @@ def count_companies(
         google_searched=google_searched,
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
+        min_claude_score=min_claude_score,
         industry=industry,
         tags=tags,
     )

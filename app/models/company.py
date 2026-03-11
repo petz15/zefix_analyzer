@@ -65,6 +65,12 @@ class Company(Base):
     # Geocoded coordinates (from Nominatim, based on the Zefix address)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # TF-IDF clustering label (e.g. "software · entwicklung · digital")
+    tfidf_cluster: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Claude Haiku classification score and category
+    claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 

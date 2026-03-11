@@ -53,14 +53,73 @@ _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
 ]
 
 
-def _derive_industry(purpose: str | None) -> str | None:
+# Stopwords for TF-IDF vectorization (German + French + common business terms)
+_TFIDF_STOPWORDS: set[str] = {
+    "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
+    "den", "ein", "eine", "einer", "eines", "sich", "auf", "zu", "ist",
+    "sowie", "als", "auch", "nicht", "nach", "bei", "alle", "durch", "wird",
+    "deren", "diese", "dieser", "dieses", "sie", "ihr", "ihren", "ihres",
+    "haben", "hat", "hatte", "werden", "war", "sind", "sein",
+    "les", "des", "une", "est", "dans", "par", "sur", "aux",
+    "the", "and", "of", "in", "for", "to", "a", "an", "with", "its",
+    "gesellschaft", "unternehmen", "betrieb", "zweck", "aktien", "gmbh",
+    "ag", "sarl", "sàrl", "cie", "co", "inc", "insbesondere",
+}
+
+# Default system prompt for Claude classification
+_DEFAULT_CLAUDE_PROMPT = (
+    "You are evaluating Swiss company register (Zefix) entries as potential B2B leads. "
+    "Given the company name, purpose statement, and optionally an industry label, output ONLY a JSON object "
+    "(no markdown, no explanation) with exactly two fields:\n"
+    '- "score": integer 0-100 (100 = perfect lead, 0 = completely irrelevant)\n'
+    '- "category": short English category label (e.g. "Technology", "Manufacturing", "Consulting", "Retail")\n\n'
+    "Consider: Is the company an active SME likely to need services or products? "
+    "Holding companies, pure financial entities, and non-commercial associations score lower."
+)
+
+
+def _derive_industry(
+    purpose: str | None,
+    taxonomy: list[tuple[str, list[str]]] | None = None,
+) -> str | None:
+    """Return the best-matching industry category using keyword hit count (best-match, not first-match)."""
     if not purpose:
         return None
     p = purpose.lower()
-    for industry, keywords in _INDUSTRY_KEYWORDS:
-        if any(k in p for k in keywords):
-            return industry
-    return None
+    entries = taxonomy if taxonomy is not None else _INDUSTRY_KEYWORDS
+    best_cat: str | None = None
+    best_hits = 0
+    for industry, keywords in entries:
+        hits = sum(1 for k in keywords if k in p)
+        if hits > best_hits:
+            best_cat = industry
+            best_hits = hits
+    return best_cat
+
+
+def _load_industry_taxonomy(db: Session) -> list[tuple[str, list[str]]]:
+    """Load industry keyword taxonomy from settings (falls back to hardcoded defaults).
+
+    DB format — one category per line:
+        Technology: software, informatik, it-, digital
+        Finance: finanz, buchhaltung, steuer
+    """
+    raw = crud.get_setting(db, "industry_taxonomy", "").strip()
+    if not raw:
+        return _INDUSTRY_KEYWORDS
+    result: list[tuple[str, list[str]]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        cat, kw_str = line.split(":", 1)
+        cat = cat.strip()
+        keywords = [k.strip().lower() for k in kw_str.split(",") if k.strip()]
+        if cat and keywords:
+            result.append((cat, keywords))
+    return result if result else _INDUSTRY_KEYWORDS
 
 
 def _load_scoring_config(db: Session) -> dict[str, str]:
@@ -73,6 +132,7 @@ def _extract_company_fields(
     fallback_uid: str,
     *,
     scoring_config: dict[str, str] | None = None,
+    taxonomy: list[tuple[str, list[str]]] | None = None,
 ) -> CompanyCreate:
     name_raw = raw.get("name", "")
     if isinstance(name_raw, dict):
@@ -161,7 +221,7 @@ def _extract_company_fields(
     old_names = _json_field(raw.get("oldNames"))
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
-    industry = _derive_industry(purpose)
+    industry = _derive_industry(purpose, taxonomy)
     score_breakdown = compute_zefix_score_breakdown(
         legal_form=legal_form_display,
         legal_form_short_name=legal_form_short,
@@ -219,7 +279,8 @@ def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]
     """
     raw = zefix_get_company(uid)
     scoring_config = _load_scoring_config(db)
-    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config)
+    taxonomy = _load_industry_taxonomy(db)
+    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config, taxonomy=taxonomy)
 
     existing = crud.get_company_by_uid(db, company_data.uid)
     if existing:
@@ -692,6 +753,7 @@ def bulk_import_zefix(
     """
     target_cantons = cantons or SWISS_CANTONS
     scoring_config = _load_scoring_config(db)
+    taxonomy = _load_industry_taxonomy(db)
 
     # ── Checkpoint / resume ──────────────────────────────────────────────────
     run = None
@@ -747,7 +809,7 @@ def bulk_import_zefix(
             for result in results:
                 if not result.uid:
                     continue
-                _bulk_industry = _derive_industry(result.purpose)
+                _bulk_industry = _derive_industry(result.purpose, taxonomy)
                 company_data = CompanyCreate(
                     uid=result.uid,
                     name=result.name,
@@ -1039,5 +1101,274 @@ def run_batch_collect(
 
         if progress_cb:
             progress_cb(i, stats["selected"], stats)
+
+    return stats
+
+
+# ── Industry re-derivation batch ─────────────────────────────────────────────
+
+def rederive_industry_batch(
+    db: Session,
+    *,
+    canton: str | None = None,
+    industry_filter: str | None = None,
+    min_zefix_score: int | None = None,
+    limit: int | None = None,
+    batch_size: int = 500,
+    resume_from: int = 0,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Re-derive the industry label for matching companies using the current taxonomy.
+
+    Uses best-match scoring (highest keyword hit count wins) and the configurable
+    taxonomy from app_settings.  Re-computes zefix_score when the industry changes.
+
+    Returns:
+        ``{"updated": int, "unchanged": int, "errors": list[str]}``
+    """
+    stats: dict[str, Any] = {"updated": 0, "unchanged": 0, "errors": []}
+    taxonomy = _load_industry_taxonomy(db)
+    scoring_config = _load_scoring_config(db)
+
+    query = db.query(Company)
+    if canton:
+        query = query.filter(Company.canton == canton)
+    if industry_filter:
+        query = query.filter(Company.industry.ilike(f"%{industry_filter}%"))
+    if min_zefix_score is not None:
+        query = query.filter(Company.zefix_score >= min_zefix_score)
+    query = query.order_by(Company.id.asc())
+    if limit:
+        query = query.limit(limit)
+
+    company_ids = [c.id for c in query.with_entities(Company.id).all()]
+    total = len(company_ids)
+    offset = max(0, min(resume_from, total))
+
+    while offset < total:
+        batch_ids = company_ids[offset: offset + batch_size]
+        batch = db.query(Company).filter(Company.id.in_(batch_ids)).order_by(Company.id.asc()).all()
+
+        for company in batch:
+            try:
+                new_industry = _derive_industry(company.purpose, taxonomy)
+                if new_industry != company.industry:
+                    company.industry = new_industry
+                    score_breakdown = compute_zefix_score_breakdown(
+                        legal_form=company.legal_form,
+                        legal_form_short_name=company.legal_form_short_name,
+                        capital_nominal=company.capital_nominal,
+                        purpose=company.purpose,
+                        branch_offices=company.branch_offices,
+                        industry=new_industry,
+                        status=company.status,
+                        canton=company.canton,
+                        municipality=company.municipality,
+                        lat=company.lat,
+                        lon=company.lon,
+                        config=scoring_config,
+                    )
+                    company.zefix_score = int(score_breakdown["final_score"])
+                    company.zefix_score_breakdown = json.dumps(score_breakdown)
+                    stats["updated"] += 1
+                else:
+                    stats["unchanged"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
+
+
+# ── TF-IDF clustering batch ───────────────────────────────────────────────────
+
+def tfidf_classify_batch(
+    db: Session,
+    *,
+    canton: str | None = None,
+    industry_filter: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int = 1000,
+    n_clusters: int = 10,
+    resume_from: int = 0,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Cluster companies by TF-IDF similarity of their purpose text.
+
+    Assigns a human-readable cluster label (top-3 TF-IDF terms) to each
+    company's ``tfidf_cluster`` field.  Uses K-Means on scikit-learn TF-IDF
+    vectors; no external API calls.
+
+    Returns:
+        ``{"classified": int, "skipped": int, "errors": list[str]}``
+    """
+    try:
+        from sklearn.cluster import KMeans
+        from sklearn.feature_extraction.text import TfidfVectorizer
+    except ImportError:
+        return {"classified": 0, "skipped": 0, "errors": ["scikit-learn not installed. Run: pip install scikit-learn"]}
+
+    stats: dict[str, Any] = {"classified": 0, "skipped": 0, "errors": []}
+
+    query = db.query(Company).filter(Company.purpose.isnot(None))
+    if canton:
+        query = query.filter(Company.canton == canton)
+    if industry_filter:
+        query = query.filter(Company.industry.ilike(f"%{industry_filter}%"))
+    if min_zefix_score is not None:
+        query = query.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        query = query.filter(Company.zefix_score <= max_zefix_score)
+
+    companies = query.order_by(Company.id.asc()).limit(limit).all()
+    if not companies:
+        return stats
+
+    purposes = [c.purpose or "" for c in companies]
+    actual_k = min(n_clusters, len(companies))
+
+    vectorizer = TfidfVectorizer(
+        max_features=800,
+        ngram_range=(1, 2),
+        stop_words=list(_TFIDF_STOPWORDS),
+        min_df=2,
+        sublinear_tf=True,
+    )
+    try:
+        X = vectorizer.fit_transform(purposes)
+    except ValueError as exc:
+        return {"classified": 0, "skipped": len(companies), "errors": [f"TF-IDF failed: {exc}"]}
+
+    km = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
+    labels = km.fit_predict(X)
+
+    # Build human-readable label for each cluster (top-3 TF-IDF terms by centroid weight)
+    feature_names = vectorizer.get_feature_names_out()
+    cluster_labels: dict[int, str] = {}
+    for i in range(actual_k):
+        center = km.cluster_centers_[i]
+        top_idx = center.argsort()[-3:][::-1]
+        top_terms = [feature_names[j] for j in top_idx]
+        cluster_labels[i] = " · ".join(top_terms)
+
+    total = len(companies)
+    batch_size = 200
+    offset = max(0, min(resume_from, total))
+
+    for idx in range(offset, total, batch_size):
+        batch_slice = slice(idx, idx + batch_size)
+        for company, label_idx in zip(companies[batch_slice], labels[batch_slice]):
+            try:
+                company.tfidf_cluster = cluster_labels[int(label_idx)]
+                stats["classified"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {exc}")
+                stats["skipped"] += 1
+        db.commit()
+        if progress_cb:
+            progress_cb(min(idx + batch_size, total), total, stats)
+
+    return stats
+
+
+# ── Claude Haiku classification batch ────────────────────────────────────────
+
+def claude_classify_batch(
+    db: Session,
+    *,
+    canton: str | None = None,
+    industry_filter: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int = 500,
+    system_prompt: str | None = None,
+    api_key: str | None = None,
+    resume_from: int = 0,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Classify companies using Claude Haiku and store a lead-quality score + category.
+
+    Each company's ``purpose`` (and optionally ``industry``) is sent to
+    claude-haiku-4-5 with a classification prompt.  The response JSON is parsed
+    to extract ``score`` (0-100) and ``category`` (short label), which are stored
+    in ``claude_score`` and ``claude_category``.
+
+    Returns:
+        ``{"classified": int, "skipped": int, "errors": list[str], "input_tokens": int, "output_tokens": int}``
+    """
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        return {"classified": 0, "skipped": 0, "errors": ["anthropic package not installed. Run: pip install anthropic"], "input_tokens": 0, "output_tokens": 0}
+
+    if not api_key:
+        return {"classified": 0, "skipped": 0, "errors": ["Anthropic API key not configured. Set ANTHROPIC_API_KEY in .env"], "input_tokens": 0, "output_tokens": 0}
+
+    stats: dict[str, Any] = {"classified": 0, "skipped": 0, "errors": [], "input_tokens": 0, "output_tokens": 0}
+    client = _anthropic.Anthropic(api_key=api_key)
+    prompt = (system_prompt or "").strip() or _DEFAULT_CLAUDE_PROMPT
+
+    query = db.query(Company).filter(Company.purpose.isnot(None))
+    if canton:
+        query = query.filter(Company.canton == canton)
+    if industry_filter:
+        query = query.filter(Company.industry.ilike(f"%{industry_filter}%"))
+    if min_zefix_score is not None:
+        query = query.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        query = query.filter(Company.zefix_score <= max_zefix_score)
+
+    companies = query.order_by(Company.id.asc()).limit(limit).all()
+    total = len(companies)
+    offset = max(0, min(resume_from, total))
+
+    for i, company in enumerate(companies[offset:], start=offset + 1):
+        try:
+            user_text = f"Company: {company.name}\nPurpose: {company.purpose}"
+            if company.industry:
+                user_text += f"\nIndustry: {company.industry}"
+
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=128,
+                system=prompt,
+                messages=[{"role": "user", "content": user_text}],
+            )
+            response_text = msg.content[0].text.strip()
+            stats["input_tokens"] += msg.usage.input_tokens
+            stats["output_tokens"] += msg.usage.output_tokens
+
+            # Strip optional markdown code fences
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+
+            data = json.loads(response_text)
+            company.claude_score = max(0, min(100, int(data.get("score", 0))))
+            company.claude_category = str(data.get("category", ""))[:128]
+            company.claude_scored_at = datetime.now(tz=timezone.utc)
+            stats["classified"] += 1
+
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid}: {exc}")
+            stats["skipped"] += 1
+
+        if i % 50 == 0:
+            db.commit()
+            if progress_cb:
+                progress_cb(i, total, stats)
+
+        time.sleep(0.15)  # ~6 req/s — well within Haiku rate limits
+
+    db.commit()
+    if progress_cb:
+        progress_cb(total, total, stats)
 
     return stats
