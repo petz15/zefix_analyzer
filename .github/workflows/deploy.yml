@@ -11,12 +11,41 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]') || contains(github.event.head_commit.message, '[major]')
     runs-on: [self-hosted, linux, zefix]
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version and record build date
+        run: |
+          current=$(cat VERSION | tr -d '[:space:]')
+          major=$(echo "$current" | cut -d. -f1)
+          minor=$(echo "$current" | cut -d. -f2)
+          patch=$(echo "$current" | cut -d. -f3)
+
+          msg="${{ github.event.head_commit.message }}"
+          if echo "$msg" | grep -qF '[major]'; then
+            major=$((major + 1))
+            minor=0
+            patch=0
+          else
+            patch=$((patch + 1))
+          fi
+
+          new_version="${major}.${minor}.${patch}"
+          echo "$new_version" > VERSION
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > BUILD_DATE
+          echo "VERSION=$new_version" >> "$GITHUB_ENV"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION BUILD_DATE
+          git commit -m "chore: bump version to ${new_version} [skip ci]"
+          git push
 
       - name: Make deploy script executable
         run: chmod +x ./deploy.sh

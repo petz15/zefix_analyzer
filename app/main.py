@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import time
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,23 @@ from app.config import settings
 from app.database import Base, engine
 from app.services.scoring import get_default_scoring_config
 from app.ui.routes import kick_job_worker, router as ui_router
+
+_REPO_ROOT = pathlib.Path(__file__).parent.parent
+
+
+def _read_version_info() -> tuple[str, str]:
+    try:
+        version = (_REPO_ROOT / "VERSION").read_text().strip()
+    except FileNotFoundError:
+        version = "dev"
+    try:
+        build_date = (_REPO_ROOT / "BUILD_DATE").read_text().strip()
+    except FileNotFoundError:
+        build_date = "unknown"
+    return version, build_date
+
+
+APP_VERSION, BUILD_DATE = _read_version_info()
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -165,7 +183,7 @@ app = FastAPI(
         "Internal GUI tool for analysing Swiss registered companies via the Zefix API, "
         "Google Search enrichment, and manual notes stored in PostgreSQL."
     ),
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -268,6 +286,7 @@ def health():
     error = getattr(app.state, "startup_error", None)
     elapsed = int(time.time() - getattr(app.state, "startup_started_at", time.time()))
     message = getattr(app.state, "startup_message", "")
+    base = {"version": APP_VERSION, "build_date": BUILD_DATE}
     if error:
-        return {"status": "error", "detail": error, "elapsed_s": elapsed}
-    return {"status": "ok" if ready else "starting", "step": message, "elapsed_s": elapsed}
+        return {**base, "status": "error", "detail": error, "elapsed_s": elapsed}
+    return {**base, "status": "ok" if ready else "starting", "step": message, "elapsed_s": elapsed}
