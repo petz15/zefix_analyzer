@@ -174,7 +174,7 @@
     <div class="col-picker-bar">
       <div class="col-picker-wrap">
         <button type="button" class="secondary-btn" id="col-picker-btn" onclick="toggleColPicker()">Columns ▾</button>
-        <div class="col-picker-dropdown" id="col-picker-dropdown" hidden>
+        <div class="col-picker-dropdown" id="col-picker-dropdown" style="display:none;">
           <div class="col-picker-title">Show / hide columns</div>
           <label><input type="checkbox" data-col="1" checked> Canton</label>
           <label><input type="checkbox" data-col="2" checked> Status</label>
@@ -398,13 +398,13 @@
 
   function toggleColPicker() {
     var dd = document.getElementById('col-picker-dropdown');
-    dd.hidden = !dd.hidden;
+    dd.style.display = dd.style.display === 'none' ? 'flex' : 'none';
   }
 
   document.addEventListener('click', function(e) {
     var wrap = document.querySelector('.col-picker-wrap');
     if (wrap && !wrap.contains(e.target)) {
-      document.getElementById('col-picker-dropdown').hidden = true;
+      document.getElementById('col-picker-dropdown').style.display = 'none';
     }
   });
 
