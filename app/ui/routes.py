@@ -93,9 +93,16 @@ def _searched_bool(google_searched: str | None) -> str | None:
     return google_searched or None
 
 
+def _url_for(request: Request, endpoint: str, **query) -> str:
+    """Build endpoint URL and append optional query params."""
+    base = str(request.url_for(endpoint))
+    clean = {k: v for k, v in query.items() if v is not None and v != ""}
+    return f"{base}?{urlencode(clean)}" if clean else base
+
+
 @router.get("/", include_in_schema=False)
-def root_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/ui", status_code=status.HTTP_302_FOUND)
+def root_redirect(request: Request) -> RedirectResponse:
+    return RedirectResponse(url=str(request.url_for("ui_home")), status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/ui", response_class=HTMLResponse, include_in_schema=False)
@@ -463,49 +470,49 @@ def ui_company_detail(
 
 
 @router.post("/ui/companies/{company_id}/zefix-refresh", include_in_schema=False)
-def zefix_refresh_company(company_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def zefix_refresh_company(company_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
-        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_home", error="Company not found"), status_code=status.HTTP_303_SEE_OTHER)
 
     try:
         updated, _ = import_company_from_zefix_uid(db, company.uid)
         geocode_and_update_company(db, updated)
     except Exception as exc:  # noqa: BLE001
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error={quote_plus(str(exc))}",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error=str(exc)),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message={quote_plus('Zefix data refreshed')}",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Zefix data refreshed"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
 @router.post("/ui/companies/{company_id}/google-search", include_in_schema=False)
-def google_search_for_company(company_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def google_search_for_company(company_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     if crud.get_setting(db, "google_search_enabled", "true") != "true":
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error={quote_plus('Google Search is disabled (GOOGLE_SEARCH_ENABLED=false)')}",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error="Google Search is disabled (GOOGLE_SEARCH_ENABLED=false)"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     company = crud.get_company(db, company_id)
     if not company:
-        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_home", error="Company not found"), status_code=status.HTTP_303_SEE_OTHER)
 
     try:
         enriched, _ = enrich_company_website(db, company)
     except Exception as exc:  # noqa: BLE001
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error={quote_plus(str(exc))}",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error=str(exc)),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     msg = "Google search complete — results scored and saved" if enriched else "No search results returned"
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message={quote_plus(msg)}",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message=msg),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -513,6 +520,7 @@ def google_search_for_company(company_id: int, db: Session = Depends(get_db)) ->
 @router.post("/ui/companies/{company_id}/edit", include_in_schema=False)
 def edit_company(
     company_id: int,
+    request: Request,
     website_url: str = Form(""),
     review_status: str = Form(""),
     proposal_status: str = Form(""),
@@ -525,7 +533,7 @@ def edit_company(
 ) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
-        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_home", error="Company not found"), status_code=status.HTTP_303_SEE_OTHER)
 
     new_values = dict(
         website_url=website_url.strip() or None,
@@ -548,7 +556,7 @@ def edit_company(
         new_values=new_values,
     )
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message=Company+updated",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Company updated"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -587,13 +595,14 @@ def quick_status(
 @router.post("/ui/companies/{company_id}/set-website", include_in_schema=False)
 def set_website(
     company_id: int,
+    request: Request,
     website_url: str = Form(...),
     website_match_score: int = Form(0),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
-        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_home", error="Company not found"), status_code=status.HTTP_303_SEE_OTHER)
 
     crud.update_company(
         db,
@@ -601,7 +610,7 @@ def set_website(
         CompanyUpdate(website_url=website_url.strip() or None, website_match_score=website_match_score),
     )
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message=Website+updated",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Website updated"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -609,23 +618,24 @@ def set_website(
 @router.post("/ui/companies/{company_id}/notes", include_in_schema=False)
 def create_note(
     company_id: int,
+    request: Request,
     content: str = Form(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
-        return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_home", error="Company not found"), status_code=status.HTTP_303_SEE_OTHER)
 
     content_clean = content.strip()
     if not content_clean:
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error=Note+content+cannot+be+empty",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error="Note content cannot be empty"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     crud.create_note(db, company_id, NoteCreate(content=content_clean))
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message=Note+added",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Note added"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -634,42 +644,43 @@ def create_note(
 def edit_note(
     company_id: int,
     note_id: int,
+    request: Request,
     content: str = Form(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     note = crud.get_note(db, note_id)
     if not note or note.company_id != company_id:
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error=Note+not+found",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error="Note not found"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     content_clean = content.strip()
     if not content_clean:
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error=Note+content+cannot+be+empty",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error="Note content cannot be empty"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     crud.update_note(db, note, NoteUpdate(content=content_clean))
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message=Note+updated",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Note updated"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
 @router.post("/ui/companies/{company_id}/notes/{note_id}/delete", include_in_schema=False)
-def delete_note(company_id: int, note_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def delete_note(company_id: int, note_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     note = crud.get_note(db, note_id)
     if not note or note.company_id != company_id:
         return RedirectResponse(
-            url=f"/ui/companies/{company_id}?error=Note+not+found",
+            url=_url_for(request, "ui_company_detail", company_id=company_id, error="Note not found"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     crud.delete_note(db, note)
     return RedirectResponse(
-        url=f"/ui/companies/{company_id}?message=Note+deleted",
+        url=_url_for(request, "ui_company_detail", company_id=company_id, message="Note deleted"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -746,6 +757,7 @@ def ui_settings(
 
 @router.post("/ui/settings", include_in_schema=False)
 def save_settings(
+    request: Request,
     google_search_enabled: str = Form("false"),
     google_daily_quota: str = Form("100"),
     zefix_industry_bonus: str = Form("15"),
@@ -785,7 +797,7 @@ def save_settings(
     crud.set_setting(db, "claude_classify_prompt", claude_classify_prompt.strip())
 
     return RedirectResponse(
-        url=f"/ui/settings?message={quote_plus('Settings saved')}",
+        url=_url_for(request, "ui_settings", message="Settings saved"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -800,11 +812,11 @@ def start_recalculate_scores(request: Request) -> RedirectResponse:
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/settings?error={quote_plus(err)}",
+            url=_url_for(request, "ui_settings", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/settings?message={quote_plus(f'Scoring recalculation queued (job #{job.id})')}",
+        url=_url_for(request, "ui_settings", message=f"Scoring recalculation queued (job #{job.id})"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -819,11 +831,11 @@ def start_recalculate_google_scores(request: Request) -> RedirectResponse:
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/settings?error={quote_plus(err)}",
+            url=_url_for(request, "ui_settings", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/settings?message={quote_plus(f'Google score recalculation queued (job #{job.id})')}",
+        url=_url_for(request, "ui_settings", message=f"Google score recalculation queued (job #{job.id})"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -840,11 +852,11 @@ def start_re_geocode(request: Request, db: Session = Depends(get_db)) -> Redirec
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/settings?error={quote_plus(err)}",
+            url=_url_for(request, "ui_settings", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/settings?message={quote_plus(f'Re-geocode job queued (job #{job.id})')}",
+        url=_url_for(request, "ui_settings", message=f"Re-geocode job queued (job #{job.id})"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -883,8 +895,8 @@ def start_rederive_industry(
 
     job, err = _enqueue_job_safe(request, job_type="rederive_industry", label=label, params=params)
     if err:
-        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'Industry re-derivation queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Industry re-derivation queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/ui/classify/tfidf", include_in_schema=False)
@@ -915,8 +927,8 @@ def start_tfidf_classify(
     label = f"TF-IDF cluster ({params['limit']} companies, {params['n_clusters']} clusters)"
     job, err = _enqueue_job_safe(request, job_type="tfidf_classify", label=label, params=params)
     if err:
-        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'TF-IDF clustering queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"TF-IDF clustering queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/ui/classify/claude", include_in_schema=False)
@@ -946,8 +958,8 @@ def start_claude_classify(
     label = f"Claude classify ({params['limit']} companies)"
     job, err = _enqueue_job_safe(request, job_type="claude_classify", label=label, params=params)
     if err:
-        return RedirectResponse(url=f"/ui/settings?error={quote_plus(err)}", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=f"/ui/settings?message={quote_plus(f'Claude classification queued (job #{job.id})')}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Claude classification queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ── Collection ────────────────────────────────────────────────────────────────
@@ -1336,7 +1348,7 @@ def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
     job = crud.get_job(db, job_id)
     if not job:
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            url=_url_for(request, "ui_jobs", error="Job not found"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -1348,13 +1360,13 @@ def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
         crud.create_event(db, job_id=job.id, level="warn", message="Cancellation requested")
     else:
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Only queued, running, or paused jobs can be cancelled')}",
+            url=_url_for(request, "ui_jobs", error="Only queued, running, or paused jobs can be cancelled"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     _ensure_job_worker(request.app)
     return RedirectResponse(
-        url=f"/ui/jobs?message={quote_plus(f'Cancellation requested for job #{job_id}')}",
+        url=_url_for(request, "ui_jobs", message=f"Cancellation requested for job #{job_id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1364,18 +1376,18 @@ def pause_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> R
     job = crud.get_job(db, job_id)
     if not job:
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            url=_url_for(request, "ui_jobs", error="Job not found"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     if job.status != "running":
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Only running jobs can be paused')}",
+            url=_url_for(request, "ui_jobs", error="Only running jobs can be paused"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     crud.mark_pause_requested(db, job)
     crud.create_event(db, job_id=job.id, level="info", message="Pause requested")
     return RedirectResponse(
-        url=f"/ui/jobs?message={quote_plus(f'Pause requested for job #{job_id}')}",
+        url=_url_for(request, "ui_jobs", message=f"Pause requested for job #{job_id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1385,19 +1397,19 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
     job = crud.get_job(db, job_id)
     if not job:
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            url=_url_for(request, "ui_jobs", error="Job not found"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     if job.status != "paused":
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Only paused jobs can be resumed')}",
+            url=_url_for(request, "ui_jobs", error="Only paused jobs can be resumed"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     crud.resume_paused_job(db, job)
     crud.create_event(db, job_id=job.id, level="info", message=f"Resumed from {job.progress_done or 0}")
     _ensure_job_worker(request.app)
     return RedirectResponse(
-        url=f"/ui/jobs?message={quote_plus(f'Job #{job_id} resumed')}",
+        url=_url_for(request, "ui_jobs", message=f"Job #{job_id} resumed"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1450,11 +1462,11 @@ async def start_bulk(
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus(err)}",
+            url=_url_for(request, "ui_collection", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/collection?message={quote_plus(f'Queued bulk job #{job.id}')}",
+        url=_url_for(request, "ui_collection", message=f"Queued bulk job #{job.id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1479,11 +1491,11 @@ async def start_batch(
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus(err)}",
+            url=_url_for(request, "ui_collection", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/collection?message={quote_plus(f'Queued batch job #{job.id}')}",
+        url=_url_for(request, "ui_collection", message=f"Queued batch job #{job.id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1503,7 +1515,7 @@ async def start_initial(
 
     if not name_list and not uid_list:
         return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus('Enter at least one company name or UID')}",
+            url=_url_for(request, "ui_collection", error="Enter at least one company name or UID"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -1522,11 +1534,11 @@ async def start_initial(
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus(err)}",
+            url=_url_for(request, "ui_collection", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/collection?message={quote_plus(f'Queued initial search job #{job.id}')}",
+        url=_url_for(request, "ui_collection", message=f"Queued initial search job #{job.id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1567,11 +1579,11 @@ async def start_detail(
     )
     if err:
         return RedirectResponse(
-            url=f"/ui/collection?error={quote_plus(err)}",
+            url=_url_for(request, "ui_collection", error=err),
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        url=f"/ui/collection?message={quote_plus(f'Queued detail job #{job.id}')}",
+        url=_url_for(request, "ui_collection", message=f"Queued detail job #{job.id}"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1582,4 +1594,4 @@ def dismiss_task(request: Request) -> RedirectResponse:
     task = getattr(request.app.state, "collection_task", None)
     if task and task.get("done"):
         request.app.state.collection_task = None
-    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=str(request.url_for("ui_collection")), status_code=status.HTTP_303_SEE_OTHER)

@@ -7,7 +7,7 @@
   <div class="stack-header">
     <h2>{{ company.name }}</h2>
     <div style="display:flex; gap:0.5rem; align-items:center;">
-      <form method="post" action="/ui/companies/{{ company.id }}/zefix-refresh">
+      <form method="post" action="{{ request.url_for('zefix_refresh_company', company_id=company.id) }}">
         <button type="submit" class="button-link secondary" style="font-size:0.85rem;">↻ Refresh from Zefix</button>
       </form>
       <a class="button-link secondary" href="{{ back_url }}">Back to list</a>
@@ -126,7 +126,7 @@
 <section class="card">
   <details>
     <summary class="section-toggle">Edit Company Fields</summary>
-    <form method="post" action="/ui/companies/{{ company.id }}/edit" class="edit-form">
+    <form method="post" action="{{ request.url_for('edit_company', company_id=company.id) }}" class="edit-form">
       <div class="form-grid">
         <label class="form-label">
           <span>Website URL</span>
@@ -181,7 +181,7 @@
   <div class="stack-header">
     <h3>Google Search Results</h3>
     {% if google_search_enabled %}
-    <form method="post" action="/ui/companies/{{ company.id }}/google-search">
+    <form method="post" action="{{ request.url_for('google_search_for_company', company_id=company.id) }}">
       <button type="submit">{% if company.website_checked_at %}Re-run search{% else %}Run Google Search{% endif %}</button>
     </form>
     {% else %}
@@ -191,7 +191,7 @@
 
   {% if google_results %}
     <p class="muted-hint">Select the best matching website and click "Use selected".</p>
-    <form method="post" action="/ui/companies/{{ company.id }}/set-website">
+    <form method="post" action="{{ request.url_for('set_website', company_id=company.id) }}">
       <div class="results-list">
         {% for r in google_results %}
           <label class="result-card {% if company.website_url == r.link %}result-card--active{% endif %}">
@@ -226,7 +226,7 @@
 {# ── Notes ────────────────────────────────────────────────────────────────── #}
 <section class="card">
   <h3>Notes</h3>
-  <form method="post" action="/ui/companies/{{ company.id }}/notes" class="stack-form">
+  <form method="post" action="{{ request.url_for('create_note', company_id=company.id) }}" class="stack-form">
     <textarea name="content" rows="3" placeholder="Add a research note…" required></textarea>
     <button type="submit">Add note</button>
   </form>
@@ -237,7 +237,7 @@
         <div class="note-head">
           <small>{{ n.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
           <div class="note-actions">
-            <form method="post" action="/ui/companies/{{ company.id }}/notes/{{ n.id }}/delete"
+            <form method="post" action="{{ request.url_for('delete_note', company_id=company.id, note_id=n.id) }}"
                   onsubmit="return confirm('Delete this note?')">
               <button type="submit" class="danger small">Delete</button>
             </form>
@@ -246,7 +246,7 @@
         <p class="note-content">{{ n.content }}</p>
         <details class="note-edit-toggle">
           <summary class="note-edit-summary">Edit</summary>
-          <form method="post" action="/ui/companies/{{ company.id }}/notes/{{ n.id }}/edit" class="stack-form note-edit-form">
+          <form method="post" action="{{ request.url_for('edit_note', company_id=company.id, note_id=n.id) }}" class="stack-form note-edit-form">
             <textarea name="content" rows="3" required>{{ n.content }}</textarea>
             <button type="submit">Save</button>
           </form>
@@ -304,7 +304,7 @@
     {% else %}
       <p class="muted-hint" style="margin:0.8rem 0 0.2rem;">
         No Zefix detail data fetched yet.
-        Run <a href="/ui/collection">Zefix detail fetch</a> to load the full record for this company.
+        Run <a href="{{ request.url_for('ui_collection') }}">Zefix detail fetch</a> to load the full record for this company.
       </p>
     {% endif %}
   </details>

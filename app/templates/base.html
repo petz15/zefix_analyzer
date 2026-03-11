@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Zefix Analyzer</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="{{ request.url_for('static', path='styles.css') }}">
   {% block extra_head %}{% endblock %}
 </head>
 <body>
   <header class="site-header">
     <div class="container" style="display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
       <div>
-        <a class="brand" href="/ui">Zefix Analyzer</a>
+        <a class="brand" href="{{ request.url_for('ui_home') }}">Zefix Analyzer</a>
         <p class="subtitle">Swiss company leads dashboard</p>
       </div>
       <nav style="display: flex; gap: 0.6rem; align-items: center; padding-bottom: 0.8rem;">
-        <a class="button-link secondary" href="/ui">Dashboard</a>
-        <a class="button-link secondary" href="/ui/map">Map</a>
-        <a class="button-link secondary" href="/ui/collection">Collection</a>
-        <a class="button-link secondary" href="/ui/jobs">Jobs</a>
-        <a class="button-link secondary" href="/ui/settings">Settings</a>
+        <a class="button-link secondary" href="{{ request.url_for('ui_home') }}">Dashboard</a>
+        <a class="button-link secondary" href="{{ request.url_for('ui_map') }}">Map</a>
+        <a class="button-link secondary" href="{{ request.url_for('ui_collection') }}">Collection</a>
+        <a class="button-link secondary" href="{{ request.url_for('ui_jobs') }}">Jobs</a>
+        <a class="button-link secondary" href="{{ request.url_for('ui_settings') }}">Settings</a>
       </nav>
     </div>
   </header>

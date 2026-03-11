@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="/static/vendor/leaflet.css">
-<link rel="stylesheet" href="/static/vendor/MarkerCluster.css">
-<link rel="stylesheet" href="/static/vendor/MarkerCluster.Default.css">
-<script src="/static/vendor/leaflet.js"></script>
-<script src="/static/vendor/leaflet.markercluster.js"></script>
+<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/leaflet.css') }}">
+<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/MarkerCluster.css') }}">
+<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/MarkerCluster.Default.css') }}">
+<script src="{{ request.url_for('static', path='vendor/leaflet.js') }}"></script>
+<script src="{{ request.url_for('static', path='vendor/leaflet.markercluster.js') }}"></script>
 <style>
   #map-wrap { display: flex; gap: 1rem; height: calc(100vh - 130px); }
   #map      { flex: 1; border-radius: 6px; border: 1px solid var(--line); }
@@ -93,6 +93,10 @@
 </div>
 
 <script>
+var mapDataUrl = {{ request.url_for('api_map_data') | tojson }};
+var mapPageUrl = {{ request.url_for('ui_map') | tojson }};
+var companyBaseUrl = {{ request.url_for('ui_home') | tojson }} + '/companies/';
+
 // ── Map init ────────────────────────────────────────────────────────────────
 var map = L.map('map').setView([46.95, 8.0], 8);  // Switzerland
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -120,7 +124,7 @@ function makeMarker(f) {
     weight: 1.5,
     fillOpacity: 0.85,
   });
-  var popup = '<b><a href="/ui/companies/' + f.id + '" target="_blank">' + f.name + '</a></b>';
+  var popup = '<b><a href="' + companyBaseUrl + f.id + '" target="_blank">' + f.name + '</a></b>';
   popup += '<br><span style="color:#6b7280;font-size:0.82em;">' + (f.municipality || '') + (f.canton ? ', ' + f.canton : '') + '</span>';
   if (f.google_score !== null && f.google_score !== undefined) {
     popup += '<br>Google score: <b>' + f.google_score + '</b>';
@@ -143,7 +147,7 @@ function loadData(params) {
   var reqId = loadSeq;
   document.getElementById('map-info').textContent = 'Loading…';
   var qs = new URLSearchParams(params).toString();
-  fetch('/api/map-data' + (qs ? '?' + qs : ''))
+  fetch(mapDataUrl + (qs ? '?' + qs : ''))
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (reqId !== loadSeq) return;
@@ -194,13 +198,13 @@ form.addEventListener('submit', function(e) {
   var p = {};
   new FormData(form).forEach(function(v, k) { if (v) p[k] = v; });
   // Update URL without reload
-  history.replaceState(null, '', '/ui/map' + (Object.keys(p).length ? '?' + new URLSearchParams(p) : ''));
+  history.replaceState(null, '', mapPageUrl + (Object.keys(p).length ? '?' + new URLSearchParams(p) : ''));
   scheduleLoad();
 });
 
 document.getElementById('btn-clear').addEventListener('click', function() {
   form.reset();
-  history.replaceState(null, '', '/ui/map');
+  history.replaceState(null, '', mapPageUrl);
   scheduleLoad();
 });
 
