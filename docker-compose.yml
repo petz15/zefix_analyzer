@@ -12,7 +12,11 @@ services:
     restart: unless-stopped
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        BUILD_GIT_SHA: ${BUILD_GIT_SHA:-unknown}
     # Port 8000 is internal only — exposed through nginx above
     expose:
       - "8000"
@@ -34,7 +38,11 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   collector:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        BUILD_GIT_SHA: ${BUILD_GIT_SHA:-unknown}
     profiles: ["collector"]
     env_file:
       - .env

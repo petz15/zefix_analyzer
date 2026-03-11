@@ -2,6 +2,15 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ARG BUILD_DATE=unknown
+ARG BUILD_GIT_SHA=unknown
+
+LABEL org.opencontainers.image.created=$BUILD_DATE
+LABEL org.opencontainers.image.revision=$BUILD_GIT_SHA
+
+ENV APP_BUILD_DATE=$BUILD_DATE
+ENV APP_GIT_SHA=$BUILD_GIT_SHA
+
 # Install system dependencies for psycopg2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import time
 from contextlib import asynccontextmanager
@@ -18,19 +19,24 @@ from app.ui.routes import kick_job_worker, router as ui_router, templates as ui_
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
 
-def _read_version_info() -> tuple[str, str]:
+def _read_version_info() -> tuple[str, str, str]:
     try:
         version = (_REPO_ROOT / "VERSION").read_text().strip()
     except FileNotFoundError:
         version = "dev"
-    try:
-        build_date = (_REPO_ROOT / "BUILD_DATE").read_text().strip()
-    except FileNotFoundError:
-        build_date = "unknown"
-    return version, build_date
+
+    build_date = (os.getenv("APP_BUILD_DATE") or "").strip()
+    if not build_date:
+        try:
+            build_date = (_REPO_ROOT / "BUILD_DATE").read_text().strip()
+        except FileNotFoundError:
+            build_date = "unknown"
+
+    build_git_sha = (os.getenv("APP_GIT_SHA") or "unknown").strip() or "unknown"
+    return version, build_date, build_git_sha
 
 
-APP_VERSION, BUILD_DATE = _read_version_info()
+APP_VERSION, BUILD_DATE, BUILD_GIT_SHA = _read_version_info()
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -193,6 +199,7 @@ app.include_router(ui_router)
 # Expose version info to all Jinja2 templates as globals
 ui_templates.env.globals["APP_VERSION"] = APP_VERSION
 ui_templates.env.globals["BUILD_DATE"] = BUILD_DATE
+ui_templates.env.globals["BUILD_GIT_SHA"] = BUILD_GIT_SHA
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────
@@ -290,7 +297,17 @@ def health():
     error = getattr(app.state, "startup_error", None)
     elapsed = int(time.time() - getattr(app.state, "startup_started_at", time.time()))
     message = getattr(app.state, "startup_message", "")
-    base = {"version": APP_VERSION, "build_date": BUILD_DATE}
+    base = {"version": APP_VERSION, "build_date": BUILD_DATE, "git_sha": BUILD_GIT_SHA}
     if error:
         return {**base, "status": "error", "detail": error, "elapsed_s": elapsed}
     return {**base, "status": "ok" if ready else "starting", "step": message, "elapsed_s": elapsed}
+
+
+@app.get("/metadata", tags=["metadata"])
+def metadata():
+    return {
+        "version": APP_VERSION,
+        "build_date": BUILD_DATE,
+        "git_sha": BUILD_GIT_SHA,
+        "ready": bool(getattr(app.state, "ready", False)),
+    }
