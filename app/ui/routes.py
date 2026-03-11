@@ -96,16 +96,34 @@ def _searched_bool(google_searched: str | None) -> str | None:
     return google_searched or None
 
 
-def _url_for(request: Request, endpoint: str, **query) -> str:
-    """Build endpoint URL and append optional query params."""
-    base = str(request.url_for(endpoint))
-    clean = {k: v for k, v in query.items() if v is not None and v != ""}
+_ENDPOINT_PATHS: dict[str, str] = {
+    "ui_home":           "/ui",
+    "ui_collection":     "/ui/collection",
+    "ui_settings":       "/ui/settings",
+    "ui_jobs":           "/ui/jobs",
+    "ui_map":            "/ui/map",
+}
+
+
+def _url_for(request: Request, endpoint: str, **kwargs) -> str:
+    """Build a root-relative URL for server-side redirects.
+
+    Uses hardcoded paths to avoid request.url_for() generating absolute
+    http:// URLs that break behind an HTTPS reverse proxy.
+    Path params (e.g. company_id) must be passed as kwargs alongside query params.
+    """
+    if endpoint == "ui_company_detail":
+        company_id = kwargs.pop("company_id", "")
+        base = f"/ui/companies/{company_id}"
+    else:
+        base = _ENDPOINT_PATHS.get(endpoint, "/ui")
+    clean = {k: v for k, v in kwargs.items() if v is not None and v != ""}
     return f"{base}?{urlencode(clean)}" if clean else base
 
 
 @router.get("/", include_in_schema=False)
 def root_redirect(request: Request) -> RedirectResponse:
-    return RedirectResponse(url=str(request.url_for("ui_home")), status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(url="/ui", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/ui", response_class=HTMLResponse, include_in_schema=False)
@@ -1609,4 +1627,4 @@ def dismiss_task(request: Request) -> RedirectResponse:
     task = getattr(request.app.state, "collection_task", None)
     if task and task.get("done"):
         request.app.state.collection_task = None
-    return RedirectResponse(url=str(request.url_for("ui_collection")), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
