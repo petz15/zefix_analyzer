@@ -185,6 +185,7 @@ def ui_home(
             "f_industry": industry or "",
             "f_tags": tags or "",
             "f_tfidf_cluster": tfidf_cluster or "",
+            "taxonomy_stats": crud.get_taxonomy_stats(db),
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),
             "message": message,
@@ -220,6 +221,14 @@ def ui_map(
 
 
 from fastapi.responses import JSONResponse  # noqa: E402 (local import to avoid top-level churn)
+
+
+@router.get("/api/task-status", include_in_schema=False)
+def api_task_status(request: Request):
+    task = getattr(request.app.state, "collection_task", None)
+    if task and not task.get("done", False):
+        return JSONResponse({"running": True, "label": task.get("label", ""), "message": task.get("message", "")})
+    return JSONResponse({"running": False, "label": "", "message": ""})
 
 
 @router.get("/api/map-data", include_in_schema=False)

@@ -2,7 +2,27 @@
 
 {% if active_task %}
 {% block extra_head %}<script>
-(function(){setInterval(function(){if(!document.querySelector(':focus'))location.reload();},10000);})();
+(function(){
+  var prevRunning = true;
+  function poll(){
+    fetch('/api/task-status')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.running){
+          var lbl = document.getElementById('task-label');
+          var msg = document.getElementById('task-msg');
+          if(lbl) lbl.textContent = d.label;
+          if(msg) msg.textContent = d.message;
+          prevRunning = true;
+          setTimeout(poll, 5000);
+        } else {
+          if(prevRunning){ location.reload(); }
+        }
+      })
+      .catch(function(){ setTimeout(poll, 10000); });
+  }
+  setTimeout(poll, 5000);
+})();
 </script>{% endblock %}
 {% endif %}
 
@@ -12,8 +32,8 @@
 {% if active_task %}
 <div class="collection-running-banner">
   <span class="spinner"></span>
-  <strong>{{ active_task.label }}</strong> is running in the background —
-  {{ active_task.message }}
+  <strong id="task-label">{{ active_task.label }}</strong> is running in the background —
+  <span id="task-msg">{{ active_task.message }}</span>
   <a href="/ui/collection" style="margin-left:0.75rem;">View progress →</a>
 </div>
 {% endif %}
@@ -144,22 +164,27 @@
       <label class="form-label">
         <span>Sort by</span>
         <select name="sort">
-          <option value="-updated"  {% if sort == '-updated'  %}selected{% endif %}>Last updated ↓</option>
-          <option value="updated"   {% if sort == 'updated'   %}selected{% endif %}>Last updated ↑</option>
-          <option value="-created"  {% if sort == '-created'  %}selected{% endif %}>Created ↓</option>
-          <option value="created"   {% if sort == 'created'   %}selected{% endif %}>Created ↑</option>
-          <option value="-google_score" {% if sort == '-google_score' %}selected{% endif %}>Google score ↓</option>
-          <option value="google_score"  {% if sort == 'google_score'  %}selected{% endif %}>Google score ↑</option>
-          <option value="-zefix_score"  {% if sort == '-zefix_score'  %}selected{% endif %}>Zefix score ↓</option>
-          <option value="zefix_score"   {% if sort == 'zefix_score'   %}selected{% endif %}>Zefix score ↑</option>
-          <option value="-claude_score" {% if sort == '-claude_score' %}selected{% endif %}>Claude score ↓</option>
-          <option value="claude_score"  {% if sort == 'claude_score'  %}selected{% endif %}>Claude score ↑</option>
-          <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
-          <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
-          <option value="industry"  {% if sort == 'industry'  %}selected{% endif %}>Industry A→Z</option>
-          <option value="-industry" {% if sort == '-industry' %}selected{% endif %}>Industry Z→A</option>
-          <option value="canton"    {% if sort == 'canton'    %}selected{% endif %}>Canton A→Z</option>
-          <option value="-canton"   {% if sort == '-canton'   %}selected{% endif %}>Canton Z→A</option>
+          <option value="-updated"       {% if sort == '-updated'       %}selected{% endif %}>Last updated ↓</option>
+          <option value="updated"        {% if sort == 'updated'        %}selected{% endif %}>Last updated ↑</option>
+          <option value="-created"       {% if sort == '-created'       %}selected{% endif %}>Created ↓</option>
+          <option value="created"        {% if sort == 'created'        %}selected{% endif %}>Created ↑</option>
+          <option value="-google_score"  {% if sort == '-google_score'  %}selected{% endif %}>Google score ↓</option>
+          <option value="google_score"   {% if sort == 'google_score'   %}selected{% endif %}>Google score ↑</option>
+          <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Zefix score ↓</option>
+          <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Zefix score ↑</option>
+          <option value="-claude_score"  {% if sort == '-claude_score'  %}selected{% endif %}>Claude score ↓</option>
+          <option value="claude_score"   {% if sort == 'claude_score'   %}selected{% endif %}>Claude score ↑</option>
+          <option value="name"           {% if sort == 'name'           %}selected{% endif %}>Name A→Z</option>
+          <option value="-name"          {% if sort == '-name'          %}selected{% endif %}>Name Z→A</option>
+          <option value="industry"       {% if sort == 'industry'       %}selected{% endif %}>Industry A→Z</option>
+          <option value="-industry"      {% if sort == '-industry'      %}selected{% endif %}>Industry Z→A</option>
+          <option value="tfidf_cluster"  {% if sort == 'tfidf_cluster'  %}selected{% endif %}>Cluster A→Z</option>
+          <option value="-tfidf_cluster" {% if sort == '-tfidf_cluster' %}selected{% endif %}>Cluster Z→A</option>
+          <option value="canton"         {% if sort == 'canton'         %}selected{% endif %}>Canton A→Z</option>
+          <option value="-canton"        {% if sort == '-canton'        %}selected{% endif %}>Canton Z→A</option>
+          <option value="status"         {% if sort == 'status'         %}selected{% endif %}>Status A→Z</option>
+          <option value="review_status"  {% if sort == 'review_status'  %}selected{% endif %}>Review A→Z</option>
+          <option value="proposal_status" {% if sort == 'proposal_status' %}selected{% endif %}>Proposal A→Z</option>
         </select>
       </label>
     </div>
@@ -172,6 +197,60 @@
     </div>
   </form>
 </section>
+
+{# ── Taxonomy overview ────────────────────────────────────────────────────── #}
+{% if taxonomy_stats.clusters or taxonomy_stats.industries or taxonomy_stats.tags %}
+<section class="card">
+  <details>
+    <summary class="section-toggle">Taxonomy Overview — Clusters / Industries / Tags</summary>
+    <div class="taxonomy-grid" style="margin-top:0.8rem;">
+
+      {% if taxonomy_stats.clusters %}
+      <div class="taxonomy-col">
+        <div class="taxonomy-col-title">TF-IDF Clusters ({{ taxonomy_stats.clusters | length }})</div>
+        <ul class="taxonomy-list">
+          {% for label, cnt in taxonomy_stats.clusters %}
+          <li>
+            <a class="cluster-tag" href="/ui?tfidf_cluster={{ label | urlencode }}">{{ label }}</a>
+            <span class="taxonomy-count">{{ cnt }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if taxonomy_stats.industries %}
+      <div class="taxonomy-col">
+        <div class="taxonomy-col-title">Industries ({{ taxonomy_stats.industries | length }})</div>
+        <ul class="taxonomy-list">
+          {% for label, cnt in taxonomy_stats.industries %}
+          <li>
+            <a class="taxonomy-link" href="/ui?industry={{ label | urlencode }}">{{ label }}</a>
+            <span class="taxonomy-count">{{ cnt }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if taxonomy_stats.tags %}
+      <div class="taxonomy-col">
+        <div class="taxonomy-col-title">Tags ({{ taxonomy_stats.tags | length }})</div>
+        <ul class="taxonomy-list">
+          {% for label, cnt in taxonomy_stats.tags %}
+          <li>
+            <a class="taxonomy-link" href="/ui?tags={{ label | urlencode }}">{{ label }}</a>
+            <span class="taxonomy-count">{{ cnt }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+    </div>
+  </details>
+</section>
+{% endif %}
 
 {# ── Leads table ──────────────────────────────────────────────────────────── #}
 <section class="card">
@@ -208,13 +287,22 @@
               Canton
               <span class="sort-icon">{% if sort == 'canton' %}↑{% elif sort == '-canton' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th>Status</th>
+            <th class="th-sortable" onclick="toggleSort('status')" title="Sort by status">
+              Status
+              <span class="sort-icon">{% if sort == 'status' %}↑{% elif sort == '-status' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th class="th-sortable" onclick="toggleSort('industry')" title="Sort by industry">
               Industry
               <span class="sort-icon">{% if sort == 'industry' %}↑{% elif sort == '-industry' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th>Cluster</th>
-            <th>Website</th>
+            <th class="th-sortable" onclick="toggleSort('tfidf_cluster')" title="Sort by cluster">
+              Cluster
+              <span class="sort-icon">{% if sort == 'tfidf_cluster' %}↑{% elif sort == '-tfidf_cluster' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('website')" title="Sort by website">
+              Website
+              <span class="sort-icon">{% if sort == 'website' %}↑{% elif sort == '-website' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th class="th-sortable" onclick="toggleSort('google_score')" title="Sort by Google score">
               Google Score
               <span class="sort-icon">{% if sort == 'google_score' or sort == 'score' %}↑{% elif sort == '-google_score' or sort == '-score' %}↓{% else %}↕{% endif %}</span>
@@ -227,8 +315,14 @@
               Claude Score
               <span class="sort-icon">{% if sort == 'claude_score' %}↑{% elif sort == '-claude_score' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th>Review</th>
-            <th>Proposal</th>
+            <th class="th-sortable" onclick="toggleSort('review_status')" title="Sort by review">
+              Review
+              <span class="sort-icon">{% if sort == 'review_status' %}↑{% elif sort == '-review_status' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('proposal_status')" title="Sort by proposal">
+              Proposal
+              <span class="sort-icon">{% if sort == 'proposal_status' %}↑{% elif sort == '-proposal_status' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th></th>
           </tr>
         </thead>
@@ -349,16 +443,17 @@
 {% endif %}
 
 <script>
+  var _TEXT_SORT_FIELDS = {'name':1,'canton':1,'industry':1,'tfidf_cluster':1,'status':1,'review_status':1,'proposal_status':1,'website':1};
   function toggleSort(field) {
-    const form = document.getElementById('filter-form');
-    const sortSelect = form.querySelector('[name="sort"]');
-    const cur = sortSelect.value;
+    var form = document.getElementById('filter-form');
+    var sortSelect = form.querySelector('[name="sort"]');
+    var cur = sortSelect.value;
     if (cur === field) {
       sortSelect.value = '-' + field;
     } else if (cur === '-' + field) {
       sortSelect.value = field;
     } else {
-      sortSelect.value = (field === 'name' || field === 'canton' || field === 'industry') ? field : '-' + field;
+      sortSelect.value = _TEXT_SORT_FIELDS[field] ? field : '-' + field;
     }
     form.submit();
   }
@@ -458,6 +553,16 @@
     text-decoration: none;
   }
   a.cluster-tag:hover { background: var(--line, rgba(0,0,0,0.12)); color: var(--text); }
+
+  /* Taxonomy overview */
+  .taxonomy-grid { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
+  .taxonomy-col { flex: 1; min-width: 200px; }
+  .taxonomy-col-title { font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; }
+  .taxonomy-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+  .taxonomy-list li { display: flex; align-items: center; gap: 0.5rem; }
+  .taxonomy-link { font-size: 0.85rem; color: var(--accent, #2563eb); text-decoration: none; }
+  .taxonomy-link:hover { text-decoration: underline; }
+  .taxonomy-count { font-size: 0.78rem; color: var(--muted); margin-left: auto; padding-left: 0.5rem; }
   .stat-item--link {
     text-decoration: none;
     color: inherit;

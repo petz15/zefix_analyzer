@@ -8,22 +8,32 @@ from app.schemas.company import CompanyCreate, CompanyUpdate
 
 # Valid sort keys → (column_attr, ascending)
 _SORT_MAP = {
-    "name":         (Company.name,               True),
-    "-name":        (Company.name,               False),
-    "google_score":  (Company.website_match_score, True),
-    "-google_score": (Company.website_match_score, False),
-    "zefix_score":   (Company.zefix_score,  True),
-    "-zefix_score":  (Company.zefix_score,  False),
-    "claude_score":  (Company.claude_score, True),
-    "-claude_score": (Company.claude_score, False),
-    "industry":      (Company.industry, True),
-    "-industry":     (Company.industry, False),
-    "canton":       (Company.canton,             True),
-    "-canton":      (Company.canton,             False),
-    "updated":      (Company.updated_at,         True),
-    "-updated":     (Company.updated_at,         False),
-    "created":      (Company.created_at,         True),
-    "-created":     (Company.created_at,         False),
+    "name":             (Company.name,               True),
+    "-name":            (Company.name,               False),
+    "google_score":     (Company.website_match_score, True),
+    "-google_score":    (Company.website_match_score, False),
+    "zefix_score":      (Company.zefix_score,        True),
+    "-zefix_score":     (Company.zefix_score,        False),
+    "claude_score":     (Company.claude_score,       True),
+    "-claude_score":    (Company.claude_score,       False),
+    "industry":         (Company.industry,           True),
+    "-industry":        (Company.industry,           False),
+    "tfidf_cluster":    (Company.tfidf_cluster,      True),
+    "-tfidf_cluster":   (Company.tfidf_cluster,      False),
+    "canton":           (Company.canton,             True),
+    "-canton":          (Company.canton,             False),
+    "status":           (Company.status,             True),
+    "-status":          (Company.status,             False),
+    "review_status":    (Company.review_status,      True),
+    "-review_status":   (Company.review_status,      False),
+    "proposal_status":  (Company.proposal_status,    True),
+    "-proposal_status": (Company.proposal_status,    False),
+    "website":          (Company.website_url,        True),
+    "-website":         (Company.website_url,        False),
+    "updated":          (Company.updated_at,         True),
+    "-updated":         (Company.updated_at,         False),
+    "created":          (Company.created_at,         True),
+    "-created":         (Company.created_at,         False),
 }
 _DEFAULT_SORT = "-updated"
 
@@ -186,6 +196,36 @@ def get_company_stats(db: Session) -> dict:
         "searches_today": searches_today,
         "review": review_counts,
         "proposal": proposal_counts,
+    }
+
+
+def get_taxonomy_stats(db: Session) -> dict:
+    """Return distinct values + counts for tfidf_cluster, industry, and tags (sorted by count desc)."""
+    clusters = (
+        db.query(Company.tfidf_cluster, func.count(Company.id).label("cnt"))
+        .filter(Company.tfidf_cluster.isnot(None))
+        .group_by(Company.tfidf_cluster)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    industries = (
+        db.query(Company.industry, func.count(Company.id).label("cnt"))
+        .filter(Company.industry.isnot(None))
+        .group_by(Company.industry)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    tags = (
+        db.query(Company.tags, func.count(Company.id).label("cnt"))
+        .filter(Company.tags.isnot(None))
+        .group_by(Company.tags)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    return {
+        "clusters": [(r.tfidf_cluster, r.cnt) for r in clusters],
+        "industries": [(r.industry, r.cnt) for r in industries],
+        "tags": [(r.tags, r.cnt) for r in tags],
     }
 
 
