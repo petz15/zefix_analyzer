@@ -89,7 +89,7 @@
 <section class="card" style="max-width: 540px;">
   <h2>Settings</h2>
 
-  <form method="post" action="{{ request.url_for('save_settings') }}" class="edit-form">
+  <form method="post" action="/ui/settings" class="edit-form">
 
     <div class="form-grid" style="grid-template-columns: 1fr;">
 
@@ -174,26 +174,26 @@
     </details>
 
     <button type="submit">Save settings</button>
-    <a class="button-link secondary" href="{{ request.url_for('ui_home') }}" style="margin-left: 0.5rem;">Cancel</a>
+    <a class="button-link secondary" href="/ui" style="margin-left: 0.5rem;">Cancel</a>
   </form>
 
   <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
 
-  <form method="post" action="{{ request.url_for('start_recalculate_scores') }}">
+  <form method="post" action="/ui/scoring/recalculate">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Recompute all saved <code>zefix_score</code> values after you change the scoring algorithm.
     </p>
     <button type="submit">Recalculate Zefix scores</button>
   </form>
 
-  <form method="post" action="{{ request.url_for('start_recalculate_google_scores') }}" style="margin-top:0.6rem;">
+  <form method="post" action="/ui/scoring/recalculate-google" style="margin-top:0.6rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Recompute all saved Google <code>website_match_score</code> values from stored search results.
     </p>
     <button type="submit">Recalculate Google scores</button>
   </form>
 
-  <form method="post" action="{{ request.url_for('start_re_geocode') }}" style="margin-top:0.6rem;">
+  <form method="post" action="/ui/scoring/re-geocode" style="margin-top:0.6rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Re-geocode all company addresses using the swisstopo building register (street-level precision).
       Run this after the building DB has been built or if map coordinates look inaccurate.
@@ -204,7 +204,7 @@
   <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
   <h3 style="margin-bottom:0.5rem;">Industry classification</h3>
 
-  <form method="post" action="{{ request.url_for('start_rederive_industry') }}">
+  <form method="post" action="/ui/classify/rederive-industry">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Re-derive the <code>industry</code> label for existing companies using the current taxonomy and
       best-match scoring. Recomputes <code>zefix_score</code> when the label changes.
@@ -226,7 +226,7 @@
     <button type="submit">Re-derive industry labels</button>
   </form>
 
-  <form method="post" action="{{ request.url_for('start_tfidf_classify') }}" style="margin-top:1rem;">
+  <form method="post" action="/ui/classify/tfidf" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Cluster companies by TF-IDF similarity of their purpose text. Stores a human-readable
       <code>tfidf_cluster</code> label (top-3 terms) on each matched company. No API calls — runs locally.
@@ -255,7 +255,7 @@
     <button type="submit">Run TF-IDF clustering</button>
   </form>
 
-  <form method="post" action="{{ request.url_for('start_claude_classify') }}" style="margin-top:1rem;">
+  <form method="post" action="/ui/classify/claude" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
       <code>claude_category</code> per company. Requires an Anthropic API key (set above).

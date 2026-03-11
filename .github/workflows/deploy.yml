@@ -11,10 +11,15 @@ concurrency:
 
 jobs:
   deploy:
-    # Run if manually triggered OR commit message contains [deploy]
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
     runs-on: [self-hosted, linux, zefix]
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Make deploy script executable
+        run: chmod +x ./deploy.sh
+
       - name: Deploy
-        run: /deploy.sh
+        run: ./deploy.sh

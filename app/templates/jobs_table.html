@@ -50,21 +50,21 @@
         </td>
         <td style="white-space:nowrap;">
           {% if j.status == 'running' %}
-          <form method="post" action="{{ request.url_for('pause_job', job_id=j.id) }}" style="display:inline;">
+          <form method="post" action="/ui/jobs/{{ j.id }}/pause" style="display:inline;">
             <button type="submit" class="secondary small">Pause</button>
           </form>
-          <form method="post" action="{{ request.url_for('cancel_job', job_id=j.id) }}" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+          <form method="post" action="/ui/jobs/{{ j.id }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
             <button type="submit" class="danger small">Cancel</button>
           </form>
           {% elif j.status == 'queued' %}
-          <form method="post" action="{{ request.url_for('cancel_job', job_id=j.id) }}" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+          <form method="post" action="/ui/jobs/{{ j.id }}/cancel" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
             <button type="submit" class="danger small">Cancel</button>
           </form>
           {% elif j.status == 'paused' %}
-          <form method="post" action="{{ request.url_for('resume_job', job_id=j.id) }}" style="display:inline;">
+          <form method="post" action="/ui/jobs/{{ j.id }}/resume" style="display:inline;">
             <button type="submit" class="secondary small">Resume</button>
           </form>
-          <form method="post" action="{{ request.url_for('cancel_job', job_id=j.id) }}" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+          <form method="post" action="/ui/jobs/{{ j.id }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
             <button type="submit" class="danger small">Cancel</button>
           </form>
           {% else %}

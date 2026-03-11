@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/leaflet.css') }}">
-<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/MarkerCluster.css') }}">
-<link rel="stylesheet" href="{{ request.url_for('static', path='vendor/MarkerCluster.Default.css') }}">
-<script src="{{ request.url_for('static', path='vendor/leaflet.js') }}"></script>
-<script src="{{ request.url_for('static', path='vendor/leaflet.markercluster.js') }}"></script>
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
+<link rel="stylesheet" href="/static/vendor/MarkerCluster.css">
+<link rel="stylesheet" href="/static/vendor/MarkerCluster.Default.css">
+<script src="/static/vendor/leaflet.js"></script>
+<script src="/static/vendor/leaflet.markercluster.js"></script>
 <style>
   #map-wrap { display: flex; gap: 1rem; height: calc(100vh - 130px); }
   #map      { flex: 1; border-radius: 6px; border: 1px solid var(--line); }
@@ -93,9 +93,9 @@
 </div>
 
 <script>
-var mapDataUrl = {{ request.url_for('api_map_data') | tojson }};
-var mapPageUrl = {{ request.url_for('ui_map') | tojson }};
-var companyBaseUrl = {{ request.url_for('ui_home') | tojson }} + '/companies/';
+var mapDataUrl = '/api/map-data';
+var mapPageUrl = '/ui/map';
+var companyBaseUrl = '/ui/companies/';
 
 // ── Map init ────────────────────────────────────────────────────────────────
 var map = L.map('map').setView([46.95, 8.0], 8);  // Switzerland

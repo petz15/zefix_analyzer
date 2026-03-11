@@ -55,7 +55,14 @@
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show --stat 41e8b56)",
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show --stat 733f5d0)",
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/ui/routes.py)",
-      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/base.html)"
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/base.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/map.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/index.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/settings.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/collection.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/company_detail.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs.html)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs_table.html)"
     ]
   }
 }

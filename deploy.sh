@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="/opt/zefix_analyzer"
+APP_DIR="$HOME/coding_projects/zefix_analyzer"
 BRANCH="main"
 
 cd "$APP_DIR"

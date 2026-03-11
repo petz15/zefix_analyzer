@@ -19,7 +19,7 @@
           <p style="font-weight:600; color:var(--danger); margin:0 0 0.3rem;">{{ task.label }} — failed</p>
           <pre style="background:var(--error-bg); color:var(--error-ink); border:1px solid #f0b8b8; padding:0.6rem 0.8rem; border-radius:4px; white-space:pre-wrap; word-break:break-word; margin:0.5rem 0 0;">{{ task.error }}</pre>
         </div>
-        <form method="post" action="{{ request.url_for('dismiss_task') }}">
+        <form method="post" action="/ui/collection/dismiss">
           <button class="button-link secondary" type="submit" style="white-space:nowrap;">Dismiss</button>
         </form>
       </div>
@@ -61,7 +61,7 @@
             </details>
           {% endif %}
         </div>
-        <form method="post" action="{{ request.url_for('dismiss_task') }}">
+        <form method="post" action="/ui/collection/dismiss">
           <button class="button-link secondary" type="submit" style="white-space:nowrap;">Dismiss</button>
         </form>
       </div>
@@ -78,7 +78,7 @@
       Last checkpoint: canton <strong>{{ incomplete_bulk.last_canton or "—" }}</strong>
       offset <strong>{{ incomplete_bulk.last_offset or 0 }}</strong>
     </p>
-    <form method="post" action="{{ request.url_for('start_bulk') }}" style="display:inline;">
+    <form method="post" action="/ui/collection/bulk" style="display:inline;">
       <input type="hidden" name="resume" value="true">
       <input type="hidden" name="page_size" value="200">
       <input type="hidden" name="delay" value="0.5">
@@ -99,7 +99,7 @@
       run a batch afterwards to enrich. Uses the canton-list endpoint with pagination
       so no per-company detail call is made, keeping request volume low.
     </p>
-    <form method="post" action="{{ request.url_for('start_bulk') }}">
+    <form method="post" action="/ui/collection/bulk">
       <div style="margin-bottom:0.8rem;">
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
           Cantons (blank = all 26)
@@ -134,7 +134,7 @@
       results against the company profile, and saves the best-matching website URL.
       Respects the daily Google quota set in Settings.
     </p>
-    <form method="post" action="{{ request.url_for('start_batch') }}">
+    <form method="post" action="/ui/collection/batch">
       <div style="max-width:200px; margin-bottom:0.8rem;">
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
         <input type="number" name="limit" value="100" min="1" max="10000"
@@ -162,7 +162,7 @@
     purpose, address, legal form, raw JSON — by calling the per-UID endpoint.
     Useful after a bulk import, which only stores basic data.
   </p>
-  <form method="post" action="{{ request.url_for('start_detail') }}">
+  <form method="post" action="/ui/collection/detail">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
@@ -208,7 +208,7 @@
     Each imported company can optionally be enriched with Google Search immediately.
     Use this for targeted lookups before or instead of a full bulk sweep.
   </p>
-  <form method="post" action="{{ request.url_for('start_initial') }}">
+  <form method="post" action="/ui/collection/initial">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">

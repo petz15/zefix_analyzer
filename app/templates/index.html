@@ -7,7 +7,6 @@
 {% endif %}
 
 {% block content %}
-{% set ui_home_url = request.url_for('ui_home') %}
 
 {# ── Background collection banner ─────────────────────────────────────────── #}
 {% if active_task %}
@@ -15,23 +14,23 @@
   <span class="spinner"></span>
   <strong>{{ active_task.label }}</strong> is running in the background —
   {{ active_task.message }}
-  <a href="{{ request.url_for('ui_collection') }}" style="margin-left:0.75rem;">View progress →</a>
+  <a href="/ui/collection" style="margin-left:0.75rem;">View progress →</a>
 </div>
 {% endif %}
 
 {# ── Stats bar ────────────────────────────────────────────────────────────── #}
 <section class="card stats-bar">
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}">
+  <a class="stat-item stat-item--link" href="/ui">
     <span class="stat-value">{{ stats.total }}</span>
     <span class="stat-label">Total companies</span>
   </a>
   <div class="stat-divider"></div>
   {% if google_search_enabled %}
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?google_searched=yes">
+  <a class="stat-item stat-item--link" href="/ui?google_searched=yes">
     <span class="stat-value">{{ stats.searched }}</span>
     <span class="stat-label">Google searched</span>
   </a>
-  <a class="stat-item stat-item--link stat-item--muted" href="{{ ui_home_url }}?google_searched=no">
+  <a class="stat-item stat-item--link stat-item--muted" href="/ui?google_searched=no">
     <span class="stat-value">{{ stats.total - stats.searched }}</span>
     <span class="stat-label">Not yet searched</span>
   </a>
@@ -43,28 +42,28 @@
   </div>
   {% endif %}
   <div class="stat-divider"></div>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?review_status=confirmed">
+  <a class="stat-item stat-item--link" href="/ui?review_status=confirmed">
     <span class="stat-value text-green">{{ stats.review.confirmed }}</span>
     <span class="stat-label">Confirmed</span>
   </a>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?review_status=interesting">
+  <a class="stat-item stat-item--link" href="/ui?review_status=interesting">
     <span class="stat-value text-blue">{{ stats.review.interesting }}</span>
     <span class="stat-label">Interesting</span>
   </a>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?review_status=_none">
+  <a class="stat-item stat-item--link" href="/ui?review_status=_none">
     <span class="stat-value text-muted">{{ stats.review.pending }}</span>
     <span class="stat-label">Pending review</span>
   </a>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?review_status=rejected">
+  <a class="stat-item stat-item--link" href="/ui?review_status=rejected">
     <span class="stat-value text-red">{{ stats.review.rejected }}</span>
     <span class="stat-label">Rejected</span>
   </a>
   <div class="stat-divider"></div>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?proposal_status=sent">
+  <a class="stat-item stat-item--link" href="/ui?proposal_status=sent">
     <span class="stat-value text-yellow">{{ stats.proposal.sent }}</span>
     <span class="stat-label">Proposals sent</span>
   </a>
-  <a class="stat-item stat-item--link" href="{{ ui_home_url }}?proposal_status=converted">
+  <a class="stat-item stat-item--link" href="/ui?proposal_status=converted">
     <span class="stat-value text-green">{{ stats.proposal.converted }}</span>
     <span class="stat-label">Converted</span>
   </a>
@@ -72,7 +71,7 @@
 
 {# ── Filter panel ─────────────────────────────────────────────────────────── #}
 <section class="card">
-  <form method="get" action="{{ ui_home_url }}" id="filter-form" class="filter-form">
+  <form method="get" action="/ui" id="filter-form" class="filter-form">
     <div class="filter-grid">
       <label class="form-label">
         <span>Name</span>
@@ -162,8 +161,8 @@
 
     <div class="filter-actions">
       <button type="submit">Apply filters</button>
-      <a class="button-link secondary" href="{{ ui_home_url }}">Clear</a>
-      <a class="button-link secondary" href="{{ request.url_for('export_csv') }}{{ '?' + filter_qs[1:] if filter_qs else '' }}">Export CSV</a>
+      <a class="button-link secondary" href="/ui">Clear</a>
+      <a class="button-link secondary" href="/ui/export.csv{{ '?' + filter_qs[1:] if filter_qs else '' }}">Export CSV</a>
       <span class="filter-count">{{ total }} result{% if total != 1 %}s{% endif %}</span>
     </div>
   </form>
@@ -282,7 +281,7 @@
             </td>
             <td>
                     <select class="status-select" data-company-id="{{ c.id }}" data-field="review_status"
-                      data-url="{{ request.url_for('quick_status', company_id=c.id) }}"
+                      data-url="/ui/companies/{{ c.id }}/quick-status"
                       data-original="{{ c.review_status or '' }}">
                 <option value=""            {% if not c.review_status                     %}selected{% endif %}>pending</option>
                 <option value="confirmed"   {% if c.review_status == 'confirmed'           %}selected{% endif %}>confirmed</option>
@@ -292,7 +291,7 @@
             </td>
             <td>
                     <select class="status-select" data-company-id="{{ c.id }}" data-field="proposal_status"
-                      data-url="{{ request.url_for('quick_status', company_id=c.id) }}"
+                      data-url="/ui/companies/{{ c.id }}/quick-status"
                       data-original="{{ c.proposal_status or '' }}">
                 <option value=""          {% if not c.proposal_status or c.proposal_status == 'not_sent' %}selected{% endif %}>—</option>
                 <option value="sent"      {% if c.proposal_status == 'sent'      %}selected{% endif %}>sent</option>
@@ -301,7 +300,7 @@
                 <option value="rejected"  {% if c.proposal_status == 'rejected'  %}selected{% endif %}>rejected</option>
               </select>
             </td>
-            <td><a class="button-link" href="{{ request.url_for('ui_company_detail', company_id=c.id) }}?back={{ request.url | urlencode }}">Open</a></td>
+            <td><a class="button-link" href="/ui/companies/{{ c.id }}?back={{ request.url | urlencode }}">Open</a></td>
           </tr>
           {% else %}
           <tr>

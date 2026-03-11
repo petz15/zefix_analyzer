@@ -4,8 +4,8 @@
 {% if has_active %}
 <script>
 (function () {
-  var evtSource = new EventSource({{ request.url_for('ui_jobs_stream') | tojson }});
-  var jobsPartialUrl = {{ request.url_for('ui_jobs_partial') | tojson }};
+  var evtSource = new EventSource('/ui/jobs/stream');
+  var jobsPartialUrl = '/ui/jobs/partial';
   evtSource.onmessage = function (e) {
     if (e.data === "done") { evtSource.close(); return; }
     fetch(jobsPartialUrl)
@@ -25,7 +25,7 @@
 <section class="card">
   <div class="stack-header">
     <h2 style="margin:0;">Background Jobs</h2>
-    <a class="button-link secondary" href="{{ request.url_for('ui_collection') }}">Start jobs</a>
+    <a class="button-link secondary" href="/ui/collection">Start jobs</a>
   </div>
 
   <div id="jobs-table-container">
