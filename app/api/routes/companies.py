@@ -94,6 +94,19 @@ def import_from_zefix(uid: str, db: Session = Depends(get_db)):
 
     uid_normalised = zefix_client._normalise_uid(str(raw.get("uid", uid)))
 
+    # Extract purpose from multilingual dict if needed
+    purpose_raw = raw.get("purpose") or raw.get("purposes") or None
+    if isinstance(purpose_raw, list):
+        purpose = " ".join(str(p) for p in purpose_raw if p) or None
+    elif isinstance(purpose_raw, dict):
+        purpose = (
+            purpose_raw.get("de") or purpose_raw.get("fr")
+            or purpose_raw.get("it") or purpose_raw.get("en")
+            or next(iter(purpose_raw.values()), None) or None
+        )
+    else:
+        purpose = str(purpose_raw) if purpose_raw else None
+
     company_data = CompanyCreate(
         uid=uid_normalised,
         name=name,
@@ -101,7 +114,7 @@ def import_from_zefix(uid: str, db: Session = Depends(get_db)):
         status=str(raw.get("status", "")) or None,
         municipality=raw.get("municipality") or None,
         canton=raw.get("canton") or None,
-        purpose=raw.get("purpose") or None,
+        purpose=purpose,
         address=address_str,
         zefix_raw=json.dumps(raw),
     )

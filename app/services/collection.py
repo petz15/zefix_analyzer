@@ -84,6 +84,7 @@ _TFIDF_STOPWORDS: set[str] = {
     "weltweit", "international", "global", "national",
     # Generic activity words — too broad to form meaningful clusters
     "erbringung", "dienstleistungen", "dienstleistung", "leistungen", "leistung",
+    "waren", "ware",
     "tätigkeiten", "tätigkeit", "aktivitäten", "aktivität",
     "verwaltung", "führung", "betreuung",
     "bereich", "bereiche", "bereichen", "gebiet", "gebiete", "gebieten",
@@ -113,6 +114,21 @@ _TFIDF_STOPWORDS: set[str] = {
     "ähnlicher",
     "unternehmungen",
     "ferner",
+    "bezweckt",                                              # "Die Gesellschaft bezweckt:" intro
+    "gleichartige", "gleichartiger", "gleichartigen",        # "gleichartige oder verwandte Unternehmen"
+    "verwandte", "verwandten", "verwandter",                 # ibid
+    "solchen",                                               # "sich mit solchen zusammenschliessen"
+    "zusammenschliessen",                                    # "sich mit solchen zusammenschliessen"
+    "verträge", "vertrag",                                   # "Verträge abschliessen"
+    "abschliessen",                                          # ibid
+    "sicherheiten",                                          # "Garantien und Sicherheiten zugunsten"
+    "zugunsten",                                             # "zugunsten verbundener Gesellschaften"
+    "gewähren",                                              # "Garantien und Sicherheiten gewähren"
+    "übernehmen",                                            # "Finanzierungen übernehmen"
+    "damit",                                                 # "direkt oder indirekt damit im Zusammenhang"
+    "sämtliche", "sämtlichen",                              # synonym for "alle"
+    "innmaterialgüterrechte",                               # IP rights boilerplate
+    "unternehmens",                                          # genitive: "Zweck des Unternehmens"
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -134,6 +150,11 @@ _TFIDF_STOPWORDS: set[str] = {
     "other", "such", "their", "this", "that", "these", "those",
     "including", "related", "services", "company", "activities",
     "general", "various", "especially", "particular",
+
+    # Custom sentences/words that appear in almost every purpose and don't help clustering
+    "handel mit waren", "mit waren aller art", "erbringung von dienstleistungen", "dienstleistungen aller art", "handel mit waren aller art", 
+    
+
 }
 
 # Default system prompt for Claude classification
@@ -249,7 +270,18 @@ def _extract_company_fields(
 
     uid_normalised = _normalise_uid(str(raw.get("uid", fallback_uid)))
 
-    purpose = raw.get("purpose") or None
+    # Extract purpose from multilingual dict if needed
+    purpose_raw = raw.get("purpose") or raw.get("purposes") or None
+    if isinstance(purpose_raw, list):
+        purpose = " ".join(str(p) for p in purpose_raw if p) or None
+    elif isinstance(purpose_raw, dict):
+        purpose = (
+            purpose_raw.get("de") or purpose_raw.get("fr")
+            or purpose_raw.get("it") or purpose_raw.get("en")
+            or next(iter(purpose_raw.values()), None) or None
+        )
+    else:
+        purpose = str(purpose_raw) if purpose_raw else None
 
     ehraid_raw = raw.get("ehraId") or raw.get("ehraid") or raw.get("ehra_id")
     ehraid = str(ehraid_raw) if ehraid_raw is not None else None
@@ -1340,12 +1372,24 @@ def tfidf_classify_batch(
     # c-TF-IDF: high when a term is frequent within the cluster AND rare across clusters
     c_tfidf_matrix = c_tf * c_idf  # shape: (actual_k, n_features)
 
-    # Build human-readable label for each cluster (top-3 c-TF-IDF terms)
+    # Build human-readable label for each cluster (top-3 c-TF-IDF terms).
+    # Scan up to 20 candidates and skip any term whose component words are already
+    # fully covered by a previously selected term (avoids "handel · handel waren · waren").
     cluster_labels: dict[int, str] = {}
     for i in range(actual_k):
-        top_idx = c_tfidf_matrix[i].argsort()[-3:][::-1]
-        top_terms = [feature_names[j] for j in top_idx]
-        cluster_labels[i] = " · ".join(top_terms)
+        ranked = c_tfidf_matrix[i].argsort()[::-1][:20]
+        selected: list[str] = []
+        covered: set[str] = set()
+        for j in ranked:
+            if len(selected) == 3:
+                break
+            term = feature_names[j]
+            words = set(term.split())
+            if words.issubset(covered):
+                continue  # redundant — all words already represented
+            selected.append(term)
+            covered.update(words)
+        cluster_labels[i] = " · ".join(selected)
 
     total = len(companies)
     batch_size = 200
