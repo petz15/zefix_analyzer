@@ -62,7 +62,9 @@
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/collection.html)",
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/company_detail.html)",
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs.html)",
-      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs_table.html)"
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs_table.html)",
+      "Bash(python -c \"import numpy; print\\(numpy.__version__\\)\")",
+      "Bash(/c/D/coding_projects/zefix_analyzer/.venv/Scripts/python -c \"import numpy; print\\(numpy.__version__\\)\")"
     ]
   }
 }

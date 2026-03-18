@@ -220,8 +220,8 @@ td {
 .purpose-cell {
   font-size: 0.9em;
   color: var(--muted);
-  max-height: 4.5em;
-  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* ── Status badges ─────────────────────────────────────────────────────────── */

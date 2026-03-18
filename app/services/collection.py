@@ -90,20 +90,29 @@ _TFIDF_STOPWORDS: set[str] = {
     "erwerb", "erwerben", "veräusserung", "veräussern",
     "beteiligung", "beteiligungen", "beteiligen", "halten", "verwalten", "betreiben",
     "erbringen", "anbieten", "durchführen", "ausführen",
+    "ausführung", "ausführungen",
+    "art",
+    "übernahme", "übernahmen",
+    "vertretungen", "vertretung",
+    "zubehör",
+    "dazugehörig", "dazugehörigen", "dazugehörigem",
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
-    '''Kann Zweigniederlassungen und Tochtergesellschaften im In- und Ausland
-      errichten, sich an anderen Unternehmen beteiligen, alle Geschäfte tätigen,
-     die direkt oder indirekt mit ihrem Zweck in Zusammenhang stehen, im In-
-      und Ausland Grundeigentum erwerben, belasten, veräussern und verwalten,
-      Finanzierungen vornehmen sowie Garantien und Bürgschaften eingehen.''',
-      "schweiz",
-    "kann", "errichten", "anderen", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
+    "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
     "tätigen", "direkt", "indirekt", "ihrem", "zusammenhang", "stehen",
-    "grundeigentum", "belasten", "finanzierungen", "eigene", "fremde", "rechnung",
+    "grundeigentum", "grundstück", "grundstücke", "belasten", "finanzierungen", "eigene", "fremde", "rechnung",
     "vornehmen", "garantien", "bürgschaften", "dritte", "eingehen",
     "tochtergesellschaft", "tochtergesellschaften",
     "zweigniederlassung", "zweigniederlassungen", "niederlassung", "niederlassungen",
     "inland", "ausland", "verbundenen",
+    "liegenschaften", "liegenschaft",
+    "fördern", "fördert", "förderung",
+    "geeignet", "geeignete", "geeigneten",
+    "gesellschaftszweck",
+    "zwecksetzung",
+    "gleicher", "gleiche", "gleichen",
+    "ähnlicher",
+    "unternehmungen",
+    "ferner",
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -1270,6 +1279,7 @@ def tfidf_classify_batch(
         ``{"classified": int, "skipped": int, "errors": list[str]}``
     """
     try:
+        import numpy as np
         from sklearn.cluster import KMeans
         from sklearn.feature_extraction.text import TfidfVectorizer
     except ImportError:
@@ -1309,12 +1319,31 @@ def tfidf_classify_batch(
     km = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
     labels = km.fit_predict(X)
 
-    # Build human-readable label for each cluster (top-3 TF-IDF terms by centroid weight)
+    # Build cluster-term frequency matrix: sum TF-IDF weights per cluster
     feature_names = vectorizer.get_feature_names_out()
+    n_features = len(feature_names)
+    cluster_term_matrix = np.zeros((actual_k, n_features))
+    for i in range(actual_k):
+        mask = labels == i
+        if mask.sum() > 0:
+            cluster_term_matrix[i] = np.asarray(X[mask].sum(axis=0)).flatten()
+
+    # c-IDF: penalise terms that appear across many clusters (they are generic)
+    term_cluster_presence = (cluster_term_matrix > 0).sum(axis=0)
+    c_idf = np.log(actual_k / (term_cluster_presence + 1) + 1)
+
+    # c-TF: normalise each cluster's total weight to 1 (avoids large-cluster bias)
+    cluster_totals = cluster_term_matrix.sum(axis=1, keepdims=True)
+    cluster_totals = np.where(cluster_totals == 0, 1, cluster_totals)
+    c_tf = cluster_term_matrix / cluster_totals
+
+    # c-TF-IDF: high when a term is frequent within the cluster AND rare across clusters
+    c_tfidf_matrix = c_tf * c_idf  # shape: (actual_k, n_features)
+
+    # Build human-readable label for each cluster (top-3 c-TF-IDF terms)
     cluster_labels: dict[int, str] = {}
     for i in range(actual_k):
-        center = km.cluster_centers_[i]
-        top_idx = center.argsort()[-3:][::-1]
+        top_idx = c_tfidf_matrix[i].argsort()[-3:][::-1]
         top_terms = [feature_names[j] for j in top_idx]
         cluster_labels[i] = " · ".join(top_terms)
 
