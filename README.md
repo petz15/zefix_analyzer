@@ -477,7 +477,106 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 - [ ] **Scheduler UI** — configure recurring runs directly from the dashboard; view calendar/history
 - [x] **AI-assisted scoring** — Claude Haiku batch classification (`claude_score` + `claude_category`); TF-IDF unsupervised clustering (`tfidf_cluster`); configurable industry taxonomy with best-match derivation
 - [ ] **Duplicate detection** — flag companies that appear to share a website, suggesting they are related entities
-- [ ] **Website crawler** — fetch and parse homepage (and 1–2 internal pages: About, Contact, Services) using `httpx` + `beautifulsoup4`; extract visible text, emails, phone numbers, and social links; store in new DB columns and feed into a richer match score; JS-rendered sites require Playwright (heavier, separate Docker service)
+- [ ] **Website scraping — Phase 1 (httpx + BeautifulSoup, no JS rendering)**
+
+  > **Goal:** After Google search stores a `website_url`, fetch that URL and extract human-written company text to enrich clustering, Claude scoring, and lead qualification.  No new heavy dependencies; builds directly on existing job/batch infrastructure.
+
+  **Why it matters:** Zefix purpose text is legal boilerplate.  The company's own website is written to attract customers — far richer input for NLP and scoring.
+
+  **What to extract per company (homepage only in Phase 1):**
+  - `<title>` tag
+  - `<meta name="description">` content
+  - All `<h1>`, `<h2>`, `<h3>` headings
+  - Body text from `<main>`, `<article>`, `<section>` (fall back to `<body>` if none present)
+  - Email addresses (regex over full page source: `[\w.+-]+@[\w-]+\.[a-z]{2,}`)
+  - Phone numbers (regex: Swiss formats `+41`, `041`, `0\d{2}`)
+  - Strip: `<nav>`, `<footer>`, `<header>`, `<script>`, `<style>`, `<noscript>`, cookie banners (`id/class` containing "cookie", "consent", "banner", "gdpr")
+  - Truncate combined extracted text to 4 000 characters before storing
+
+  **New DB columns** (add via Alembic migration `0016_add_website_scrape_fields.py`):
+  ```
+  website_text        String(4000)   nullable  — cleaned extracted text
+  website_scraped_at  DateTime       nullable  — timestamp of last scrape
+  website_scrape_ok   Boolean        nullable  — True=success, False=failed/blocked, None=not attempted
+  ```
+
+  **New service function:** `app/services/scraper.py` → `scrape_company_website(company, *, timeout=10) -> dict`
+  - Use `httpx` (already in requirements) with a realistic browser User-Agent string
+  - Respect `robots.txt`: use `urllib.robotparser` to check before fetching
+  - Follow up to 3 redirects
+  - Timeout: 10 s connect + 15 s read
+  - Return `{"text": str, "ok": bool, "error": str | None}`
+
+  **New batch function:** `scrape_websites_batch(db, *, limit=500, only_unscraped=True, resume_from=0, progress_cb=None) -> dict`
+  - Filters: `Company.website_url.isnot(None)` AND (if `only_unscraped`) `Company.website_scraped_at.is_(None)`
+  - Rate limit: `time.sleep(1.0)` between requests (configurable `delay_seconds` param)
+  - Commit every 50 companies; honour resume_from checkpointing
+  - Stats keys: `scraped`, `skipped`, `failed`, `errors`
+
+  **New job type:** `"website_scrape"` — add to job worker `elif` chain in `app/ui/routes.py` alongside existing `hdbscan_cluster`, `claude_classify`, etc.
+
+  **New route + UI:** POST `/ui/enrich/scrape-websites` form in Settings page under a new "Website enrichment" section.  Fields: limit (default 500), delay_seconds (default 1.0), only_unscraped checkbox.
+
+  **Where scraped text feeds:**
+  1. `claude_classify_batch` — append `website_text` to the prompt context when available
+  2. `cluster_pipeline.run_pipeline` — concatenate `purpose + " " + (website_text or "")` as the text field fed into spaCy preprocessing
+
+  **Skip conditions** (set `website_scrape_ok=False`, do not retry until manually cleared):
+  - HTTP 403, 429, 5xx after 2 retries
+  - `website_url` domain is a known directory (already detected by existing `DIRECTORY_DOMAINS` list in `scoring.py`)
+  - Extracted text < 50 characters after cleaning (blocked page / login wall)
+  - `robots.txt` disallows `/`
+
+  **Dependencies to add to `requirements.txt`:**
+  ```
+  beautifulsoup4>=4.12.0
+  lxml>=5.0.0        # faster BS4 parser
+  ```
+
+  **Estimated coverage:** ~60–65 % of `website_url` values (the rest are JS-rendered — handled in Phase 2).
+
+- [ ] **Website scraping — Phase 2 (Playwright, JS-rendered sites)**
+
+  > **Goal:** Extend Phase 1 to cover the ~35–40 % of company websites that return a blank or near-empty page with plain httpx because they are React/Vue/Angular single-page apps.  Phase 2 is gated behind a config flag so the Docker image stays lean for deployments that don't need it.
+
+  **Trigger condition:** Run Phase 2 only for companies where `website_scrape_ok = False` AND the raw response body was < 500 characters (indicates a JS shell, not a genuine block).  Companies blocked by 403/robots remain skipped.
+
+  **New dependency:** `playwright>=1.44.0` — add to `requirements.txt` behind a comment `# Phase 2 — JS scraping`.
+  Docker: add to `Dockerfile` after existing `pip install`:
+  ```dockerfile
+  RUN pip install playwright && playwright install chromium --with-deps
+  ```
+  Gate the install behind a build arg so the base image is unchanged for Phase-1-only deploys:
+  ```dockerfile
+  ARG INSTALL_PLAYWRIGHT=false
+  RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then pip install playwright && playwright install chromium --with-deps; fi
+  ```
+
+  **New function in `app/services/scraper.py`:** `scrape_with_playwright(url, *, timeout=20) -> dict`
+  - Launch `async_playwright` with `chromium.launch(headless=True)`
+  - `page.goto(url, wait_until="networkidle", timeout=timeout*1000)`
+  - Extract same selectors as Phase 1 via `page.query_selector_all()`
+  - Reuse same cleaning/truncation logic
+  - Close browser after each call (no persistent browser instance — keeps memory bounded)
+
+  **Concurrency:** Run at most 2 Playwright instances simultaneously (configurable `playwright_concurrency` in `PipelineConfig`).  Use `asyncio.Semaphore(2)`.  The batch function becomes `async def scrape_websites_batch_playwright(...)` and is run via `asyncio.run()` from the synchronous job worker thread.
+
+  **New job type:** `"website_scrape_js"` — separate from Phase 1's `"website_scrape"` so they can be triggered independently and their progress tracked separately in the Jobs page.
+
+  **Fallback chain (what the job worker runs for a given company):**
+  ```
+  website_scrape_ok is None  →  try Phase 1 (httpx)
+  Phase 1 result: ok=False AND body<500 chars  →  queue for Phase 2 (Playwright)
+  Phase 2 result: ok=False  →  mark permanently skipped
+  ```
+
+  **Resource envelope:**
+  - Docker image: +~500 MB for Chromium
+  - RAM: ~150 MB per browser instance × 2 concurrent = ~300 MB peak overhead
+  - Speed: ~1–2 pages/s → ~14–28 hrs for 40k JS-sites (run overnight)
+  - Use `delay_seconds=0.5` default (faster than Phase 1 since JS sites handle concurrent load better)
+
+  **Estimated combined coverage (Phase 1 + Phase 2):** ~93–96 % of valid `website_url` values.
 - [ ] **Concurrent job workers** — replace the single-threaded job worker with a `ThreadPoolExecutor`; use PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` for race-condition-free job pickup; configurable `JOB_WORKER_CONCURRENCY` env var; enables crawler + import + scoring jobs to run in parallel
 
 ### Multi-user / public hosting

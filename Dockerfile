@@ -14,6 +14,7 @@ ENV APP_GIT_SHA=$BUILD_GIT_SHA
 # Install system dependencies for psycopg2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
