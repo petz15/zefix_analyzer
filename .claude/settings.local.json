@@ -65,7 +65,12 @@
       "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/jobs_table.html)",
       "Bash(python -c \"import numpy; print\\(numpy.__version__\\)\")",
       "Bash(/c/D/coding_projects/zefix_analyzer/.venv/Scripts/python -c \"import numpy; print\\(numpy.__version__\\)\")",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(.venv/Scripts/python -c \"import hdbscan; print\\(''still installed:'', hdbscan.__version__\\)\")",
+      "Bash(.venv/Scripts/python -c \"from sklearn.cluster import HDBSCAN; print\\(''sklearn HDBSCAN ok''\\)\")",
+      "Bash(ls .venv/Scripts/python*)",
+      "Bash(ls .venv/bin/python*)",
+      "Bash(.venv/Scripts/python.exe -c \"from sklearn.cluster import HDBSCAN; print\\(''sklearn HDBSCAN ok''\\); import sklearn; print\\(''sklearn version:'', sklearn.__version__\\)\")"
     ]
   }
 }
