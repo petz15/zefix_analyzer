@@ -158,7 +158,7 @@
         <input type="number" name="min_google_score" value="{{ f_min_google_score }}" min="0" max="100" placeholder="0-100">
       </label>
       <label class="form-label">
-        <span>Min Zefix score</span>
+        <span>Min score</span>
         <input type="number" name="min_zefix_score" value="{{ f_min_zefix_score }}" min="0" max="100" placeholder="0-100">
       </label>
       <label class="form-label">
@@ -174,8 +174,8 @@
           <option value="created"        {% if sort == 'created'        %}selected{% endif %}>Created ↑</option>
           <option value="-google_score"  {% if sort == '-google_score'  %}selected{% endif %}>Google score ↓</option>
           <option value="google_score"   {% if sort == 'google_score'   %}selected{% endif %}>Google score ↑</option>
-          <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Zefix score ↓</option>
-          <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Zefix score ↑</option>
+          <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Score ↓</option>
+          <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Score ↑</option>
           <option value="-claude_score"  {% if sort == '-claude_score'  %}selected{% endif %}>Claude score ↓</option>
           <option value="claude_score"   {% if sort == 'claude_score'   %}selected{% endif %}>Claude score ↑</option>
           <option value="name"           {% if sort == 'name'           %}selected{% endif %}>Name A→Z</option>
@@ -325,8 +325,8 @@
               Google Score
               <span class="sort-icon">{% if sort == 'google_score' or sort == 'score' %}↑{% elif sort == '-google_score' or sort == '-score' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by Zefix score">
-              Zefix Score
+            <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by score">
+              Score
               <span class="sort-icon">{% if sort == 'zefix_score' %}↑{% elif sort == '-zefix_score' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th class="th-sortable" onclick="toggleSort('claude_score')" title="Sort by Claude score">
@@ -389,7 +389,7 @@
             </td>
             <td>
               {% if c.zefix_score is not none %}
-                <span class="score-pill-sm score-zefix" title="Zefix priority score (not yet searched)">
+                <span class="score-pill-sm score-zefix" title="Priority score">
                   {{ c.zefix_score }}
                 </span>
               {% else %}

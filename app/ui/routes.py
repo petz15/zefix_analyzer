@@ -27,7 +27,6 @@ from app.services.collection import (
     re_geocode_all_companies,
     recalculate_google_scores,
     recalculate_zefix_scores,
-    rederive_industry_batch,
     run_batch_collect,
     run_zefix_detail_collect,
 )
@@ -780,15 +779,20 @@ def ui_settings(
             "request": request,
             "google_search_enabled": current.get("google_search_enabled", "true") == "true",
             "google_daily_quota": current.get("google_daily_quota", "100"),
-            "zefix_industry_bonus": current.get("zefix_industry_bonus", "15"),
-            "zefix_treuhand_consulting_penalty": current.get("zefix_treuhand_consulting_penalty", "15"),
-            "zefix_inactive_status_penalty": current.get("zefix_inactive_status_penalty", "40"),
-            "zefix_force_zero_status_terms": current.get("zefix_force_zero_status_terms", "being_cancelled"),
-            "zefix_target_keywords": current.get("zefix_target_keywords", ""),
-            "zefix_excluded_keywords": current.get("zefix_excluded_keywords", "treuhand,consulting"),
-            "zefix_target_clusters": current.get("zefix_target_clusters", ""),
-            "zefix_cluster_bonus": current.get("zefix_cluster_bonus", "10"),
-            "industry_taxonomy": current.get("industry_taxonomy", ""),
+            "scoring_target_clusters": current.get("scoring_target_clusters", ""),
+            "scoring_cluster_hit_points": current.get("scoring_cluster_hit_points", "10"),
+            "scoring_target_keywords": current.get("scoring_target_keywords", ""),
+            "scoring_keyword_hit_points": current.get("scoring_keyword_hit_points", "10"),
+            "scoring_origin_lat": current.get("scoring_origin_lat", "46.9266"),
+            "scoring_origin_lon": current.get("scoring_origin_lon", "7.4817"),
+            "scoring_dist_15km": current.get("scoring_dist_15km", "20"),
+            "scoring_dist_40km": current.get("scoring_dist_40km", "10"),
+            "scoring_dist_80km": current.get("scoring_dist_80km", "5"),
+            "scoring_dist_130km": current.get("scoring_dist_130km", "0"),
+            "scoring_dist_far": current.get("scoring_dist_far", "-5"),
+            "scoring_legal_form_scores": current.get("scoring_legal_form_scores", "gmbh:20,sarl:20,sàrl:20,einzelfirma:15,eg:15,kg:10,og:8,ag:8,sa:8,stiftung:3,verein:2"),
+            "scoring_legal_form_default": current.get("scoring_legal_form_default", "5"),
+            "scoring_cancelled_score": current.get("scoring_cancelled_score", "5"),
             "anthropic_api_key": current.get("anthropic_api_key", ""),
             "claude_target_description": current.get("claude_target_description", ""),
             "claude_classify_prompt": current.get("claude_classify_prompt", ""),
@@ -806,15 +810,20 @@ def save_settings(
     request: Request,
     google_search_enabled: str = Form("false"),
     google_daily_quota: str = Form("100"),
-    zefix_industry_bonus: str = Form("15"),
-    zefix_treuhand_consulting_penalty: str = Form("15"),
-    zefix_inactive_status_penalty: str = Form("40"),
-    zefix_force_zero_status_terms: str = Form("being_cancelled"),
-    zefix_target_keywords: str = Form(""),
-    zefix_excluded_keywords: str = Form("treuhand,consulting"),
-    zefix_target_clusters: str = Form(""),
-    zefix_cluster_bonus: str = Form("10"),
-    industry_taxonomy: str = Form(""),
+    scoring_target_clusters: str = Form(""),
+    scoring_cluster_hit_points: str = Form("10"),
+    scoring_target_keywords: str = Form(""),
+    scoring_keyword_hit_points: str = Form("10"),
+    scoring_origin_lat: str = Form("46.9266"),
+    scoring_origin_lon: str = Form("7.4817"),
+    scoring_dist_15km: str = Form("20"),
+    scoring_dist_40km: str = Form("10"),
+    scoring_dist_80km: str = Form("5"),
+    scoring_dist_130km: str = Form("0"),
+    scoring_dist_far: str = Form("-5"),
+    scoring_legal_form_scores: str = Form("gmbh:20,sarl:20,sàrl:20,einzelfirma:15,eg:15,kg:10,og:8,ag:8,sa:8,stiftung:3,verein:2"),
+    scoring_legal_form_default: str = Form("5"),
+    scoring_cancelled_score: str = Form("5"),
     anthropic_api_key: str = Form(""),
     claude_target_description: str = Form(""),
     claude_classify_prompt: str = Form(""),
@@ -825,26 +834,37 @@ def save_settings(
     crud.set_setting(db, "google_daily_quota", str(quota))
 
     defaults = get_default_scoring_config()
-    score_fields = {
-        "zefix_industry_bonus": zefix_industry_bonus,
-        "zefix_treuhand_consulting_penalty": zefix_treuhand_consulting_penalty,
-        "zefix_inactive_status_penalty": zefix_inactive_status_penalty,
-        "zefix_force_zero_status_terms": zefix_force_zero_status_terms,
-        "zefix_target_keywords": zefix_target_keywords,
-        "zefix_excluded_keywords": zefix_excluded_keywords,
-        "zefix_target_clusters": zefix_target_clusters,
-        "zefix_cluster_bonus": zefix_cluster_bonus,
+    # Text fields saved as-is; numeric fields validated (fall back to default on bad input)
+    _text_fields = {
+        "scoring_target_clusters": scoring_target_clusters,
+        "scoring_target_keywords": scoring_target_keywords,
+        "scoring_legal_form_scores": scoring_legal_form_scores,
     }
-    _text_fields = {"zefix_force_zero_status_terms", "zefix_target_keywords", "zefix_excluded_keywords", "zefix_target_clusters"}
-    for key, value in score_fields.items():
-        if key in _text_fields:
-            cleaned = value.strip()
-        else:
-            cleaned = str(int(value)) if value.strip().lstrip("-").isdigit() else defaults[key]
-        crud.set_setting(db, key, cleaned)
+    for key, value in _text_fields.items():
+        crud.set_setting(db, key, value.strip())
+
+    _numeric_fields = {
+        "scoring_cluster_hit_points": scoring_cluster_hit_points,
+        "scoring_keyword_hit_points": scoring_keyword_hit_points,
+        "scoring_origin_lat": scoring_origin_lat,
+        "scoring_origin_lon": scoring_origin_lon,
+        "scoring_dist_15km": scoring_dist_15km,
+        "scoring_dist_40km": scoring_dist_40km,
+        "scoring_dist_80km": scoring_dist_80km,
+        "scoring_dist_130km": scoring_dist_130km,
+        "scoring_dist_far": scoring_dist_far,
+        "scoring_legal_form_default": scoring_legal_form_default,
+        "scoring_cancelled_score": scoring_cancelled_score,
+    }
+    for key, value in _numeric_fields.items():
+        v = value.strip()
+        try:
+            float(v)  # accept int or float (lat/lon)
+            crud.set_setting(db, key, v)
+        except ValueError:
+            crud.set_setting(db, key, defaults[key])
 
     # Free-text / API settings
-    crud.set_setting(db, "industry_taxonomy", industry_taxonomy.strip())
     crud.set_setting(db, "anthropic_api_key", anthropic_api_key.strip())
     crud.set_setting(db, "claude_target_description", claude_target_description.strip())
     crud.set_setting(db, "claude_classify_prompt", claude_classify_prompt.strip())
@@ -920,36 +940,6 @@ def _parse_optional_int(val: str | None) -> int | None:
     if val and val.strip().lstrip("-").isdigit():
         return int(val.strip())
     return None
-
-
-@router.post("/ui/classify/rederive-industry", include_in_schema=False)
-def start_rederive_industry(
-    request: Request,
-    canton: str = Form(""),
-    industry_filter: str = Form(""),
-    min_zefix_score: str = Form(""),
-    limit: str = Form(""),
-) -> RedirectResponse:
-    params: dict = {}
-    if canton.strip():
-        params["canton"] = canton.strip()
-    if industry_filter.strip():
-        params["industry_filter"] = industry_filter.strip()
-    v = _parse_optional_int(min_zefix_score)
-    if v is not None:
-        params["min_zefix_score"] = v
-    lv = _parse_optional_int(limit)
-    if lv is not None:
-        params["limit"] = lv
-
-    label = "Re-derive industry labels"
-    if params.get("canton"):
-        label += f" [{params['canton']}]"
-
-    job, err = _enqueue_job_safe(request, job_type="rederive_industry", label=label, params=params)
-    if err:
-        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Industry re-derivation queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/ui/classify/hdbscan", include_in_schema=False)
@@ -1212,25 +1202,6 @@ def _run_job(app, job_id: int) -> None:
                 done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
-            elif job.job_type == "rederive_industry":
-                def _progress(done: int, total: int, stats: dict) -> None:
-                    _assert_not_cancelled()
-                    msg = f"Re-derived {done}/{total} — {stats['updated']} changed, {stats['unchanged']} unchanged"
-                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
-
-                stats = rederive_industry_batch(
-                    db,
-                    canton=params.get("canton") or None,
-                    industry_filter=params.get("industry_filter") or None,
-                    min_zefix_score=params.get("min_zefix_score"),
-                    limit=params.get("limit") or None,
-                    resume_from=resume_from,
-                    progress_cb=_progress,
-                )
-                done_msg = f"Done — {stats['updated']} updated, {stats['unchanged']} unchanged, {len(stats['errors'])} errors"
-
             elif job.job_type == "hdbscan_cluster":
                 from app.services.cluster_pipeline import PipelineConfig, run_pipeline
 

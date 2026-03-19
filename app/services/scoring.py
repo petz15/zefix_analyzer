@@ -206,20 +206,9 @@ def is_social_lead_domain(url: str) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS)
 
 
-# ── Location scoring ────────────────────────────────────────────────────────
-# Origin: Muri bei Bern (lat, lon)
+# ── Location helpers ────────────────────────────────────────────────────────
+# Default origin: Muri bei Bern (lat, lon) — used for distance_to_muri_km helper
 _ORIGIN = (46.9266, 7.4817)
-
-# Cantons within reasonable business-travel distance get a bonus; all others a deduction.
-# User-specified nearby cantons: BE, LU, BL, SO, BS, AG, ZH
-_CANTON_LOCATION_SCORE: dict[str, int] = {
-    "BE": 10, "SO": 10,          # immediate neighbours
-    "AG": 8,                      # ~65 km
-    "BL": 6, "BS": 6,             # ~70 km
-    "LU": 5,                      # ~75 km
-    "ZH": 4,                      # ~115 km
-}
-_CANTON_LOCATION_DEFAULT = -8   # all other cantons
 
 # Approximate coordinates of canton capitals — fallback when municipality not found
 _CANTON_COORDS: dict[str, tuple[float, float]] = {
@@ -281,49 +270,46 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
-def _location_score(
+def _resolve_coords(
     canton: str | None,
     municipality: str | None,
-    lat: float | None = None,
-    lon: float | None = None,
-) -> int:
-    """Return a location score (may be negative) based on proximity to Muri bei Bern.
-
-    Two components:
-      1. Canton tier  — fixed bonus/deduction per the nearby-canton list.
-      2. Distance tier — ±pts based on Haversine km from the origin, resolved as:
-           a) exact geocoded (lat, lon) when provided,
-           b) municipality name lookup,
-           c) canton centroid fallback.
-    """
-    canton_score = _CANTON_LOCATION_SCORE.get((canton or "").upper(), _CANTON_LOCATION_DEFAULT)
-
-    # Resolve company coordinates — best available source wins
+    lat: float | None,
+    lon: float | None,
+) -> tuple[float, float] | None:
     if lat is not None and lon is not None:
-        company_coords: tuple[float, float] | None = (lat, lon)
-    else:
-        company_coords = None
-        if municipality:
-            company_coords = _MUNICIPALITY_COORDS.get(municipality.lower())
-        if company_coords is None and canton:
-            company_coords = _CANTON_COORDS.get(canton.upper())
+        return (lat, lon)
+    coords: tuple[float, float] | None = None
+    if municipality:
+        coords = _MUNICIPALITY_COORDS.get(municipality.lower())
+    if coords is None and canton:
+        coords = _CANTON_COORDS.get(canton.upper())
+    return coords
 
-    if company_coords is None:
-        return canton_score
 
-    dist = _haversine_km(_ORIGIN[0], _ORIGIN[1], company_coords[0], company_coords[1])
+def _distance_score(
+    origin_lat: float,
+    origin_lon: float,
+    canton: str | None,
+    municipality: str | None,
+    lat: float | None,
+    lon: float | None,
+    config: "dict[str, str] | None",
+) -> int:
+    """Return distance-based score using configurable tier thresholds."""
+    coords = _resolve_coords(canton, municipality, lat, lon)
+    if coords is None:
+        return 0
+    dist = _haversine_km(origin_lat, origin_lon, coords[0], coords[1])
     if dist <= 15:
-        distance_score = 15
+        return _cfg_int(config, "scoring_dist_15km", 20)
     elif dist <= 40:
-        distance_score = 10
+        return _cfg_int(config, "scoring_dist_40km", 10)
     elif dist <= 80:
-        distance_score = 5
+        return _cfg_int(config, "scoring_dist_80km", 5)
     elif dist <= 130:
-        distance_score = 0
+        return _cfg_int(config, "scoring_dist_130km", 0)
     else:
-        distance_score = -5
-
-    return canton_score + distance_score
+        return _cfg_int(config, "scoring_dist_far", -5)
 
 
 def distance_to_muri_km(
@@ -333,56 +319,36 @@ def distance_to_muri_km(
     lat: float | None = None,
     lon: float | None = None,
 ) -> float | None:
-    """Return distance in km to Muri bei Bern using the best available location source.
-
-    Resolution order matches location scoring logic:
-      1. exact lat/lon,
-      2. municipality lookup,
-      3. canton centroid fallback.
-    """
-    if lat is not None and lon is not None:
-        company_coords: tuple[float, float] | None = (lat, lon)
-    else:
-        company_coords = None
-        if municipality:
-            company_coords = _MUNICIPALITY_COORDS.get(municipality.lower())
-        if company_coords is None and canton:
-            company_coords = _CANTON_COORDS.get(canton.upper())
-
-    if company_coords is None:
-        return None
-
-    return _haversine_km(_ORIGIN[0], _ORIGIN[1], company_coords[0], company_coords[1])
+    """Return distance in km to Muri bei Bern (used for batch ordering)."""
+    coords = _resolve_coords(canton, municipality, lat, lon)
+    return _haversine_km(_ORIGIN[0], _ORIGIN[1], coords[0], coords[1]) if coords else None
 
 
-# ── Legal form scoring ───────────────────────────────────────────────────────
-# Legal forms that correlate with operating businesses worth reaching out to.
-# Higher score = more likely to be a real, reachable company.
-_LEGAL_FORM_SCORES: dict[str, int] = {
-    "ag": 10, "sa": 10,          # Aktiengesellschaft / Société anonyme
-    "gmbh": 25, "sàrl": 25, "sarl": 25,  # GmbH variants
-    "eg": 20, "genossenschaft": 20,       # Cooperatives
-    "kg": 15, "kommanditgesellschaft": 15,
-    "og": 12, "kollektivgesellschaft": 12,
-    "EIU": 30, "eiu": 30, "einzelfirma": 30,  # Sole proprietorships
-    "stiftung": 8, "fondation": 8,        # Foundations — registered but may not be commercial
-    "verein": 5, "association": 5,        # Associations — usually non-commercial
-}
+# ── Individual scoring ───────────────────────────────────────────────────────
 
 _DEFAULT_SCORING_CONFIG: dict[str, str] = {
-    "zefix_industry_bonus": "15",
-    "zefix_treuhand_consulting_penalty": "15",
-    "zefix_inactive_status_penalty": "40",
-    "zefix_force_zero_status_terms": "being_cancelled",
-    # Comma-separated words. Any hit in purpose OR industry OR purpose_keywords OR tfidf_cluster → +industry_bonus pts.
-    "zefix_target_keywords": "",
-    # Comma-separated words. Any hit in purpose OR industry OR purpose_keywords OR tfidf_cluster → -consulting_penalty pts.
-    "zefix_excluded_keywords": "treuhand,consulting",
-    # Comma-separated cluster label substrings. Hit in tfidf_cluster → +cluster_bonus pts.
-    "zefix_target_clusters": "",
-    # Points awarded per matching cluster label (when zefix_target_clusters has entries).
-    "zefix_cluster_bonus": "10",
+    # Comma-separated cluster label substrings — each match adds cluster_hit_points
+    "scoring_target_clusters": "",
+    "scoring_cluster_hit_points": "10",
+    # Comma-separated purpose keyword substrings — each match adds keyword_hit_points
+    "scoring_target_keywords": "",
+    "scoring_keyword_hit_points": "10",
+    # Distance tiers (haversine from configurable origin)
+    "scoring_origin_lat": "46.9266",   # default: Muri bei Bern
+    "scoring_origin_lon": "7.4817",
+    "scoring_dist_15km":  "20",        # pts for ≤ 15 km
+    "scoring_dist_40km":  "10",        # pts for ≤ 40 km
+    "scoring_dist_80km":  "5",         # pts for ≤ 80 km
+    "scoring_dist_130km": "0",         # pts for ≤ 130 km
+    "scoring_dist_far":   "-5",        # pts for > 130 km
+    # Legal form: "short_name:points" pairs, comma-separated (case-insensitive)
+    "scoring_legal_form_scores": "gmbh:20,sarl:20,sàrl:20,einzelfirma:15,eg:15,kg:10,og:8,ag:8,sa:8,stiftung:3,verein:2",
+    "scoring_legal_form_default": "5",
+    # Fixed score for cancelled/dissolved companies (bypasses normalization)
+    "scoring_cancelled_score": "5",
 }
+
+_CANCELLED_STATUS_TERMS = frozenset({"being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"})
 
 
 def get_default_scoring_config() -> dict[str, str]:
@@ -401,23 +367,50 @@ def _cfg_int(config: dict[str, str] | None, key: str, fallback: int) -> int:
         return fallback
 
 
+def _cfg_float(config: dict[str, str] | None, key: str, fallback: float) -> float:
+    if not config:
+        return fallback
+    raw = config.get(key)
+    if raw is None:
+        return fallback
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _cfg_terms(config: dict[str, str] | None, key: str, fallback: list[str]) -> list[str]:
     if not config:
         return fallback
     raw = (config.get(key) or "").strip()
     if not raw:
         return fallback
-    return [part.strip().lower().replace("-", "_").replace(" ", "_") for part in raw.split(",") if part.strip()]
+    return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
+def _parse_legal_form_scores(config: dict[str, str] | None) -> dict[str, int]:
+    raw = (config or {}).get("scoring_legal_form_scores") or _DEFAULT_SCORING_CONFIG["scoring_legal_form_scores"]
+    result: dict[str, int] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if ":" in part:
+            key, _, val = part.partition(":")
+            try:
+                result[key.strip().lower()] = int(val.strip())
+            except ValueError:
+                pass
+    return result
+
+
+def _is_cancelled(status: str | None) -> bool:
+    norm = (status or "").lower().replace("-", "_").replace(" ", "_")
+    return any(t in norm for t in _CANCELLED_STATUS_TERMS)
 
 
 def compute_zefix_score_breakdown(
     *,
     legal_form: str | None,
     legal_form_short_name: str | None,
-    capital_nominal: str | None,
-    purpose: str | None,
-    branch_offices: str | None,
-    industry: str | None,
     status: str | None,
     canton: str | None = None,
     municipality: str | None = None,
@@ -426,108 +419,65 @@ def compute_zefix_score_breakdown(
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     config: dict[str, str] | None = None,
+    # Legacy params accepted but ignored (kept for backward-compat with old call sites)
+    capital_nominal: str | None = None,
+    purpose: str | None = None,
+    branch_offices: str | None = None,
+    industry: str | None = None,
 ) -> dict:
-    industry_bonus = _cfg_int(config, "zefix_industry_bonus", 15)
-    consulting_penalty = _cfg_int(config, "zefix_treuhand_consulting_penalty", 15)
-    inactive_penalty = _cfg_int(config, "zefix_inactive_status_penalty", 40)
-    force_zero_terms = _cfg_terms(config, "zefix_force_zero_status_terms", ["being_cancelled"])
+    cancelled_score = _cfg_int(config, "scoring_cancelled_score", 5)
 
-    target_keywords = _cfg_terms(config, "zefix_target_keywords", [])
-    excluded_keywords = _cfg_terms(config, "zefix_excluded_keywords", ["treuhand", "consulting"])
-    target_clusters = _cfg_terms(config, "zefix_target_clusters", [])
-    cluster_bonus = _cfg_int(config, "zefix_cluster_bonus", 10)
-
-    breakdown: dict[str, int | str | list[str] | bool] = {
+    breakdown: dict = {
+        "clusters": 0,
+        "keywords": 0,
+        "distance": 0,
         "legal_form": 0,
-        "capital": 0,
-        "purpose": 0,
-        "branch_offices": 0,
-        "industry_bonus": 0,
-        "keyword_match": 0,
-        "cluster_match": 0,
-        "industry_penalty": 0,
-        "location": 0,
-        "status_penalty": 0,
-        "forced_zero": False,
-        "forced_zero_reason": "",
-        "force_zero_terms": force_zero_terms,
+        "raw_total": 0,
+        "final_score": 0,
+        "cancelled": False,
     }
 
-    status_norm = (status or "").lower().replace("-", "_").replace(" ", "_")
-    if status_norm and any(term and term in status_norm for term in force_zero_terms):
-        breakdown["forced_zero"] = True
-        breakdown["forced_zero_reason"] = status or ""
-        breakdown["final_score"] = 0
+    if _is_cancelled(status):
+        breakdown["cancelled"] = True
+        breakdown["final_score"] = cancelled_score
         return breakdown
 
-    lf_key = (legal_form_short_name or legal_form or "").lower().strip()
-    breakdown["legal_form"] = _LEGAL_FORM_SCORES.get(lf_key, 5)
-
-    if capital_nominal:
-        try:
-            cap = float(str(capital_nominal).replace("'", "").replace(",", "").replace(" ", ""))
-            if cap > 100_000:
-                breakdown["capital"] = 10
-            elif cap > 0:
-                breakdown["capital"] = 5
-        except (ValueError, TypeError):
-            breakdown["capital"] = 5
-
-    if purpose:
-        words = len(re.findall(r"\w+", purpose))
-        if words >= 20:
-            breakdown["purpose"] = 20
-        elif words >= 8:
-            breakdown["purpose"] = 5
-
-    if branch_offices and branch_offices not in ("null", "[]", ""):
-        breakdown["branch_offices"] = 10
-
-    # Combined text for keyword matching (purpose + industry + per-company keywords + cluster labels)
-    combined_kw = " ".join(filter(None, [purpose, industry, purpose_keywords, tfidf_cluster])).lower()
-
-    if industry:
-        breakdown["industry_bonus"] = industry_bonus
-
-    # Target keyword match: any hit in purpose/industry/purpose_keywords/tfidf_cluster
-    if target_keywords:
-        hits = sum(1 for kw in target_keywords if kw in combined_kw)
-        if hits >= 2:
-            breakdown["keyword_match"] = industry_bonus
-        elif hits == 1:
-            breakdown["keyword_match"] = industry_bonus // 2
-
-    # Cluster match: dedicated bonus when tfidf_cluster contains a target cluster term
+    # ── Cluster hits ──────────────────────────────────────────────────────────
+    target_clusters = _cfg_terms(config, "scoring_target_clusters", [])
+    cluster_pts = _cfg_int(config, "scoring_cluster_hit_points", 10)
     if target_clusters and tfidf_cluster:
         cluster_lower = tfidf_cluster.lower()
-        cluster_hits = sum(1 for tc in target_clusters if tc in cluster_lower)
-        if cluster_hits > 0:
-            breakdown["cluster_match"] = min(cluster_hits * cluster_bonus, cluster_bonus * 3)
+        hits = sum(1 for tc in target_clusters if tc in cluster_lower)
+        breakdown["clusters"] = hits * cluster_pts
 
-    # Excluded keyword penalty: matches against full combined text incl. keywords/clusters
-    if excluded_keywords and any(kw in combined_kw for kw in excluded_keywords):
-        breakdown["industry_penalty"] = -consulting_penalty
+    # ── Keyword hits ──────────────────────────────────────────────────────────
+    target_keywords = _cfg_terms(config, "scoring_target_keywords", [])
+    kw_pts = _cfg_int(config, "scoring_keyword_hit_points", 10)
+    if target_keywords and purpose_keywords:
+        kw_lower = purpose_keywords.lower()
+        hits = sum(1 for kw in target_keywords if kw in kw_lower)
+        breakdown["keywords"] = hits * kw_pts
 
-    breakdown["location"] = _location_score(canton, municipality, lat=lat, lon=lon)
+    # ── Distance ──────────────────────────────────────────────────────────────
+    origin_lat = _cfg_float(config, "scoring_origin_lat", _ORIGIN[0])
+    origin_lon = _cfg_float(config, "scoring_origin_lon", _ORIGIN[1])
+    breakdown["distance"] = _distance_score(origin_lat, origin_lon, canton, municipality, lat, lon, config)
 
-    if status:
-        st = status.lower()
-        if not any(word in st for word in ("aktiv", "active", "eingetragen", "inscrit", "iscritto")):
-            breakdown["status_penalty"] = -inactive_penalty
+    # ── Legal form ────────────────────────────────────────────────────────────
+    lf_scores = _parse_legal_form_scores(config)
+    lf_default = _cfg_int(config, "scoring_legal_form_default", 5)
+    lf_key = (legal_form_short_name or legal_form or "").lower().strip()
+    breakdown["legal_form"] = lf_scores.get(lf_key, lf_default) if lf_key else lf_default
 
-    total = (
-        int(breakdown["legal_form"])
-        + int(breakdown["capital"])
-        + int(breakdown["purpose"])
-        + int(breakdown["branch_offices"])
-        + int(breakdown["industry_bonus"])
-        + int(breakdown["keyword_match"])
-        + int(breakdown["cluster_match"])
-        + int(breakdown["industry_penalty"])
-        + int(breakdown["location"])
-        + int(breakdown["status_penalty"])
+    raw = (
+        int(breakdown["clusters"])
+        + int(breakdown["keywords"])
+        + int(breakdown["distance"])
+        + int(breakdown["legal_form"])
     )
-    breakdown["final_score"] = max(0, min(100, total))
+    breakdown["raw_total"] = raw
+    # Clamped to 0-100 for real-time use; recalculate job normalises properly
+    breakdown["final_score"] = max(0, min(100, raw))
     return breakdown
 
 
@@ -535,10 +485,6 @@ def compute_zefix_score(
     *,
     legal_form: str | None,
     legal_form_short_name: str | None,
-    capital_nominal: str | None,
-    purpose: str | None,
-    branch_offices: str | None,
-    industry: str | None,
     status: str | None,
     canton: str | None = None,
     municipality: str | None = None,
@@ -547,14 +493,15 @@ def compute_zefix_score(
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     config: dict[str, str] | None = None,
+    # Legacy compat
+    capital_nominal: str | None = None,
+    purpose: str | None = None,
+    branch_offices: str | None = None,
+    industry: str | None = None,
 ) -> int:
-    breakdown = compute_zefix_score_breakdown(
+    return int(compute_zefix_score_breakdown(
         legal_form=legal_form,
         legal_form_short_name=legal_form_short_name,
-        capital_nominal=capital_nominal,
-        purpose=purpose,
-        branch_offices=branch_offices,
-        industry=industry,
         status=status,
         canton=canton,
         municipality=municipality,
@@ -563,5 +510,22 @@ def compute_zefix_score(
         purpose_keywords=purpose_keywords,
         tfidf_cluster=tfidf_cluster,
         config=config,
-    )
-    return int(breakdown["final_score"])
+    )["final_score"])
+
+
+def normalize_raw_scores(
+    raw_scores: dict[int, int | None],
+    cancelled_score: int = 5,
+) -> dict[int, int]:
+    """Min-max normalize raw scores to 0-100. Cancelled (None) → cancelled_score."""
+    non_cancelled = {cid: s for cid, s in raw_scores.items() if s is not None}
+    result: dict[int, int] = {}
+    if non_cancelled:
+        min_s = min(non_cancelled.values())
+        max_s = max(non_cancelled.values())
+        for cid, raw in non_cancelled.items():
+            result[cid] = round((raw - min_s) / (max_s - min_s) * 100) if max_s > min_s else 50
+    for cid, raw in raw_scores.items():
+        if raw is None:
+            result[cid] = cancelled_score
+    return result

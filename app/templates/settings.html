@@ -109,51 +109,69 @@
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Industry bonus</span>
-        <input type="number" name="zefix_industry_bonus" value="{{ zefix_industry_bonus }}" min="-100" max="100">
-        <small class="muted">Points added when an industry is detected.</small>
+        <span>Score: Target clusters</span>
+        <input type="text" name="scoring_target_clusters" value="{{ scoring_target_clusters }}" placeholder="e.g. maschinenbau, software, holz">
+        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match adds the cluster hit points. Browse names in the Taxonomy panel.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Treuhand/Consulting penalty</span>
-        <input type="number" name="zefix_treuhand_consulting_penalty" value="{{ zefix_treuhand_consulting_penalty }}" min="0" max="100">
-        <small class="muted">Points subtracted for industries containing "treuhand" or "consulting".</small>
+        <span>Score: Cluster hit points</span>
+        <input type="number" name="scoring_cluster_hit_points" value="{{ scoring_cluster_hit_points }}" min="0" max="100" step="1">
+        <small class="muted">Points per matching cluster label. Default: 10.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Inactive status penalty</span>
-        <input type="number" name="zefix_inactive_status_penalty" value="{{ zefix_inactive_status_penalty }}" min="0" max="100">
-        <small class="muted">Penalty for statuses not recognized as active.</small>
+        <span>Score: Target keywords</span>
+        <input type="text" name="scoring_target_keywords" value="{{ scoring_target_keywords }}" placeholder="e.g. software, maschinenbau, präzision">
+        <small class="muted">Comma-separated substrings matched against purpose keywords. Each match adds the keyword hit points.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Force-zero status terms</span>
-        <input type="text" name="zefix_force_zero_status_terms" value="{{ zefix_force_zero_status_terms }}" placeholder="being_cancelled, dissolved">
-        <small class="muted">Comma-separated normalized terms. If status contains one term, score is forced to 0.</small>
+        <span>Score: Keyword hit points</span>
+        <input type="number" name="scoring_keyword_hit_points" value="{{ scoring_keyword_hit_points }}" min="0" max="100" step="1">
+        <small class="muted">Points per matching purpose keyword. Default: 10.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Target keywords</span>
-        <input type="text" name="zefix_target_keywords" value="{{ zefix_target_keywords }}" placeholder="e.g. software, IT, digital, saas">
-        <small class="muted">Comma-separated words. Matched against purpose, industry, purpose keywords, and cluster labels. 1 hit → +½ industry bonus; 2+ hits → +full industry bonus.</small>
+        <span>Score: Origin latitude</span>
+        <input type="number" name="scoring_origin_lat" value="{{ scoring_origin_lat }}" step="0.0001" placeholder="46.9266">
+        <small class="muted">Latitude of your location for distance scoring. Default: 46.9266 (Muri bei Bern).</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Excluded keywords</span>
-        <input type="text" name="zefix_excluded_keywords" value="{{ zefix_excluded_keywords }}" placeholder="e.g. treuhand, consulting, holding">
-        <small class="muted">Comma-separated words. Any hit in purpose, industry, purpose keywords, or cluster labels → −consulting penalty.</small>
+        <span>Score: Origin longitude</span>
+        <input type="number" name="scoring_origin_lon" value="{{ scoring_origin_lon }}" step="0.0001" placeholder="7.4817">
+        <small class="muted">Longitude of your location. Default: 7.4817.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Target cluster labels</span>
-        <input type="text" name="zefix_target_clusters" value="{{ zefix_target_clusters }}" placeholder="e.g. maschinenbau, software, holz">
-        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each matching label adds the cluster bonus (capped at 3× bonus). Browse cluster names in the Taxonomy panel.</small>
+        <span>Score: Distance pts (≤15 km / ≤40 km / ≤80 km / ≤130 km / far)</span>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="number" name="scoring_dist_15km"  value="{{ scoring_dist_15km }}"  style="width:5rem;" placeholder="20">
+          <input type="number" name="scoring_dist_40km"  value="{{ scoring_dist_40km }}"  style="width:5rem;" placeholder="10">
+          <input type="number" name="scoring_dist_80km"  value="{{ scoring_dist_80km }}"  style="width:5rem;" placeholder="5">
+          <input type="number" name="scoring_dist_130km" value="{{ scoring_dist_130km }}" style="width:5rem;" placeholder="0">
+          <input type="number" name="scoring_dist_far"   value="{{ scoring_dist_far }}"   style="width:5rem;" placeholder="-5">
+        </div>
+        <small class="muted">Points awarded per distance tier. Negative values allowed for far-away companies.</small>
       </label>
 
       <label class="form-label">
-        <span>Zefix score: Cluster bonus (pts)</span>
-        <input type="number" name="zefix_cluster_bonus" value="{{ zefix_cluster_bonus }}" min="0" max="50" step="1">
-        <small class="muted">Points awarded per matching cluster label when target cluster labels are configured. Default: 10.</small>
+        <span>Score: Legal form scores</span>
+        <input type="text" name="scoring_legal_form_scores" value="{{ scoring_legal_form_scores }}" placeholder="gmbh:20,ag:8,einzelfirma:15,…">
+        <small class="muted">Comma-separated <code>short_name:points</code> pairs (case-insensitive). Companies not in the list get the default points below.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Legal form default (pts)</span>
+        <input type="number" name="scoring_legal_form_default" value="{{ scoring_legal_form_default }}" min="-50" max="50" step="1">
+        <small class="muted">Points for legal forms not in the list above. Default: 5.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Cancelled company score</span>
+        <input type="number" name="scoring_cancelled_score" value="{{ scoring_cancelled_score }}" min="0" max="20" step="1">
+        <small class="muted">Fixed score for companies with status being_cancelled/dissolved (bypasses normalisation). Default: 5.</small>
       </label>
 
       <label class="form-label">
@@ -170,17 +188,6 @@
       </label>
 
     </div>
-
-    <details style="margin-bottom: 0.8rem;">
-      <summary class="section-toggle">Industry taxonomy (optional — overrides built-in keyword lists)</summary>
-      <div style="margin-top: 0.7rem;">
-        <p class="muted-hint">One category per line: <code>Category Name: keyword1, keyword2, keyword3</code><br>
-          Leave empty to use the built-in 13-category defaults. Keywords are matched case-insensitively as substrings.
-          Best-match wins (most keyword hits), so order doesn't matter.</p>
-        <textarea name="industry_taxonomy" rows="14" style="width:100%; font-family: monospace; font-size: 0.85rem;"
-                  placeholder="Technology: software, informatik, it-, digital, saas&#10;Finance: finanz, buchhaltung, steuer&#10;Consulting: beratung, consulting, strategie&#10;…">{{ industry_taxonomy }}</textarea>
-      </div>
-    </details>
 
     <details style="margin-bottom: 0.8rem;">
       <summary class="section-toggle">Claude classification prompt (optional)</summary>
@@ -201,9 +208,9 @@
 
   <form method="post" action="/ui/scoring/recalculate">
     <p class="muted" style="margin: 0 0 0.6rem;">
-      Recompute all saved <code>zefix_score</code> values after you change the scoring algorithm.
+      Recompute all saved <code>zefix_score</code> values after you change the scoring settings.
     </p>
-    <button type="submit">Recalculate Zefix scores</button>
+    <button type="submit">Recalculate scores</button>
   </form>
 
   <form method="post" action="/ui/scoring/recalculate-google" style="margin-top:0.6rem;">
@@ -222,29 +229,6 @@
   </form>
 
   <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
-  <h3 style="margin-bottom:0.5rem;">Industry classification</h3>
-
-  <form method="post" action="/ui/classify/rederive-industry">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Re-derive the <code>industry</code> label for existing companies using the current taxonomy and
-      best-match scoring. Recomputes <code>zefix_score</code> when the label changes.
-    </p>
-    <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Canton</span>
-        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
-      </label>
-      <label class="form-label"><span>Current industry filter</span>
-        <input type="text" name="industry_filter" placeholder="e.g. Consulting">
-      </label>
-      <label class="form-label"><span>Min Zefix score</span>
-        <input type="number" name="min_zefix_score" placeholder="0-100">
-      </label>
-      <label class="form-label"><span>Limit (companies)</span>
-        <input type="number" name="limit" placeholder="leave empty = all">
-      </label>
-    </div>
-    <button type="submit">Re-derive industry labels</button>
-  </form>
 
   <form method="post" action="/ui/classify/hdbscan" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">

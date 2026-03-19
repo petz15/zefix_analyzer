@@ -26,31 +26,16 @@ from app.api.zefix_client import (
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
 from app.services.scoring import (
-    compute_zefix_score,
     compute_zefix_score_breakdown,
     distance_to_muri_km,
     fallback_result_score,
     get_default_scoring_config,
     is_irrelevant_result,
     is_social_lead_domain,
+    normalize_raw_scores,
     score_result,
 )
 
-_INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
-    ("Technology", ["software", "informatik", "it-", " it ", "digital", "technologie", "saas", "cloud", "künstliche intelligenz", " ai ", " ki ", "automation", "programmier", "developer", "entwicklung von"]),
-    ("Construction & Real Estate", ["bau", "real estate", "architektur", "renovati", "gebäude", "liegenschaften", "construction", "haustechnik", "sanitär", "elektroinstallation"]),
-    ("Finance", ["finanz", "finance", "invest", "kapital", "versicherung", "insurance", "treuhand", "buchhaltung", "accounting", "steuer", "tax ", "bank", "kredit", "fond", "vermögensverwaltu", "wirtschaftsprüf"]),
-    ("Healthcare", ["gesundheit", "health", "medizin", "medical", "pharma", "dental", "therapie", "pflege", "klinik", "arzt", "spital", "praxis"]),
-    ("Consulting", ["consulting", "management", "strategie", "advisory", "unternehmensberatung"]),
-    ("Trade & Retail", ["handel", " trade", "import", "export", "vertrieb", "retail", "grosshandel", "detailhandel", "e-commerce"]),
-    ("Hospitality & Food", ["restaurant", "hotel", "gastro", "gastronomie", "catering", "food", "getränke", "beverage", "café", "bäckerei"]),
-    ("Manufacturing", ["manufacturing", "fertigung", "verarbeit"]),
-    ("Transport & Logistics", ["transport", "logistik", "logistics", "spedition", "lieferung", "delivery", "kurier"]),
-    ("Education", ["bildung", "education", "schule", "ausbildung", "training", "unterricht", "weiterbildung", "coaching"]),
-    ("Marketing & Media", ["marketing", "werbung", "media", "kommunikation", " pr ", "design", "grafik", "agentur", "fotografie", "video"]),
-    ("Legal", ["rechts", "legal", "anwalt", "notariat", "kanzlei"]),
-    ("Engineering", ["engineering", "ingenieur", "planung", "maschinenbau", "electrical", "civil"]),
-]
 
 
 # Stopwords for TF-IDF vectorization (German + French + Italian + English + Swiss registry boilerplate)
@@ -261,54 +246,6 @@ Do NOT cluster scores in the 40–70 band. Use the full range so leads can be ra
 """
 
 
-def _derive_industry(
-    purpose: str | None,
-    taxonomy: list[tuple[str, list[str]]] | None = None,
-) -> str | None:
-    """Return the best-matching industry category using keyword hit count (best-match, not first-match).
-    Returns "Undefined" when purpose has no keyword matches, None when purpose is empty."""
-    if not purpose:
-        return None
-    # Strip stopword tokens so boilerplate doesn't dilute keyword matching.
-    # Pad with spaces so space-bounded keywords like " it " still match.
-    words = purpose.lower().split()
-    p = " " + " ".join(w for w in words if w not in _TFIDF_STOPWORDS) + " "
-    entries = taxonomy if taxonomy is not None else _INDUSTRY_KEYWORDS
-    best_cat: str = "Undefined"
-    best_hits = 0
-    for industry, keywords in entries:
-        hits = sum(1 for k in keywords if k in p)
-        if hits > best_hits:
-            best_cat = industry
-            best_hits = hits
-    return best_cat
-
-
-def _load_industry_taxonomy(db: Session) -> list[tuple[str, list[str]]]:
-    """Load industry keyword taxonomy from settings (falls back to hardcoded defaults).
-
-    DB format — one category per line:
-        Technology: software, informatik, it-, digital
-        Finance: finanz, buchhaltung, steuer
-    """
-    raw = crud.get_setting(db, "industry_taxonomy", "").strip()
-    if not raw:
-        return _INDUSTRY_KEYWORDS
-    result: list[tuple[str, list[str]]] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        cat, kw_str = line.split(":", 1)
-        cat = cat.strip()
-        keywords = [k.strip().lower() for k in kw_str.split(",") if k.strip()]
-        if cat and keywords:
-            result.append((cat, keywords))
-    return result if result else _INDUSTRY_KEYWORDS
-
-
 def _load_scoring_config(db: Session) -> dict[str, str]:
     defaults = get_default_scoring_config()
     return {key: crud.get_setting(db, key, val) for key, val in defaults.items()}
@@ -319,7 +256,6 @@ def _extract_company_fields(
     fallback_uid: str,
     *,
     scoring_config: dict[str, str] | None = None,
-    taxonomy: list[tuple[str, list[str]]] | None = None,
 ) -> CompanyCreate:
     name_raw = raw.get("name", "")
     if isinstance(name_raw, dict):
@@ -419,14 +355,9 @@ def _extract_company_fields(
     old_names = _json_field(raw.get("oldNames"))
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
-    industry = _derive_industry(purpose, taxonomy)
     score_breakdown = compute_zefix_score_breakdown(
         legal_form=legal_form_display,
         legal_form_short_name=legal_form_short,
-        capital_nominal=capital_nominal,
-        purpose=purpose,
-        branch_offices=branch_offices,
-        industry=industry,
         status=str(raw.get("status", "")) or None,
         canton=raw.get("canton") or None,
         municipality=raw.get("municipality") or raw.get("legalSeat") or None,
@@ -446,7 +377,6 @@ def _extract_company_fields(
         canton=raw.get("canton") or None,
         purpose=purpose,
         address=address_str,
-        industry=industry,
         zefix_score=zefix_score,
         zefix_score_breakdown=json.dumps(score_breakdown),
         ehraid=ehraid,
@@ -477,8 +407,7 @@ def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]
     """
     raw = zefix_get_company(uid)
     scoring_config = _load_scoring_config(db)
-    taxonomy = _load_industry_taxonomy(db)
-    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config, taxonomy=taxonomy)
+    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config)
 
     existing = crud.get_company_by_uid(db, company_data.uid)
     if existing:
@@ -513,10 +442,6 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
     score_breakdown = compute_zefix_score_breakdown(
         legal_form=company.legal_form,
         legal_form_short_name=company.legal_form_short_name,
-        capital_nominal=company.capital_nominal,
-        purpose=company.purpose,
-        branch_offices=company.branch_offices,
-        industry=company.industry,
         status=company.status,
         canton=company.canton,
         municipality=company.municipality,
@@ -546,16 +471,22 @@ def recalculate_zefix_scores(
     resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """Recompute zefix_score for every company using the current scoring algorithm.
+    """Recompute and normalise zefix_score for every company.
 
-    Useful after changing scoring weights — no network calls are made.
-    Commits in batches of *batch_size* to avoid holding a huge transaction.
+    Two-pass approach:
+      1. Compute raw scores for all companies (geocoding if needed).
+      2. Min-max normalise non-cancelled scores to 0-100; cancelled → cancelled_score.
 
     Returns:
-        ``{"updated": int, "errors": list[str]}``
+        ``{"updated": int, "geocoded": int, "errors": list[str]}``
     """
     stats: dict[str, Any] = {"updated": 0, "geocoded": 0, "errors": []}
     scoring_config = _load_scoring_config(db)
+    cancelled_score = int(scoring_config.get("scoring_cancelled_score", "5"))
+
+    # ── Pass 1: compute raw scores ────────────────────────────────────────────
+    raw_scores: dict[int, int | None] = {}   # company.id → raw_total or None if cancelled
+    breakdowns: dict[int, dict] = {}
 
     total = db.query(Company).count()
     offset = max(0, min(resume_from, total))
@@ -564,23 +495,16 @@ def recalculate_zefix_scores(
         batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
         if not batch:
             break
-
         for company in batch:
             try:
-                # Geocode if lat/lon not yet set
                 if company.lat is None and company.lon is None and company.address:
                     coords = geocode_address(company.address)
                     if coords:
                         company.lat, company.lon = coords
                         stats["geocoded"] += 1
-
-                score_breakdown = compute_zefix_score_breakdown(
+                bd = compute_zefix_score_breakdown(
                     legal_form=company.legal_form,
                     legal_form_short_name=company.legal_form_short_name,
-                    capital_nominal=company.capital_nominal,
-                    purpose=company.purpose,
-                    branch_offices=company.branch_offices,
-                    industry=company.industry,
                     status=company.status,
                     canton=company.canton,
                     municipality=company.municipality,
@@ -590,17 +514,33 @@ def recalculate_zefix_scores(
                     tfidf_cluster=company.tfidf_cluster,
                     config=scoring_config,
                 )
-                company.zefix_score = int(score_breakdown["final_score"])
-                company.zefix_score_breakdown = json.dumps(score_breakdown)
-                stats["updated"] += 1
+                breakdowns[company.id] = bd
+                raw_scores[company.id] = None if bd.get("cancelled") else int(bd["raw_total"])
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"{company.uid}: {exc}")
-
         db.commit()
         offset += len(batch)
-
         if progress_cb:
             progress_cb(min(offset, total), total, stats)
+
+    # ── Pass 2: normalise and write final scores ───────────────────────────────
+    normalised = normalize_raw_scores(raw_scores, cancelled_score=cancelled_score)
+
+    offset = 0
+    while True:
+        batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+        for company in batch:
+            if company.id not in normalised:
+                continue
+            bd = breakdowns.get(company.id, {})
+            bd["final_score"] = normalised[company.id]
+            company.zefix_score = normalised[company.id]
+            company.zefix_score_breakdown = json.dumps(bd)
+            stats["updated"] += 1
+        db.commit()
+        offset += len(batch)
 
     return stats
 
@@ -955,7 +895,6 @@ def bulk_import_zefix(
     """
     target_cantons = cantons or SWISS_CANTONS
     scoring_config = _load_scoring_config(db)
-    taxonomy = _load_industry_taxonomy(db)
 
     # ── Checkpoint / resume ──────────────────────────────────────────────────
     run = None
@@ -1011,7 +950,14 @@ def bulk_import_zefix(
             for result in results:
                 if not result.uid:
                     continue
-                _bulk_industry = _derive_industry(result.purpose, taxonomy)
+                _score_bd = compute_zefix_score_breakdown(
+                    legal_form=result.legal_form,
+                    legal_form_short_name=result.legal_form_short_name,
+                    status=result.status,
+                    canton=result.canton or canton,
+                    municipality=result.municipality,
+                    config=scoring_config,
+                )
                 company_data = CompanyCreate(
                     uid=result.uid,
                     name=result.name,
@@ -1021,35 +967,10 @@ def bulk_import_zefix(
                     legal_form_short_name=result.legal_form_short_name,
                     status=result.status,
                     municipality=result.municipality,
-                    canton=result.canton or canton,  # search was canton-scoped, so always known
+                    canton=result.canton or canton,
                     purpose=result.purpose,
-                    industry=_bulk_industry,
-                    zefix_score=compute_zefix_score(
-                        legal_form=result.legal_form,
-                        legal_form_short_name=result.legal_form_short_name,
-                        capital_nominal=None,
-                        purpose=result.purpose,
-                        branch_offices=None,
-                        industry=_bulk_industry,
-                        status=result.status,
-                        canton=result.canton or canton,
-                        municipality=result.municipality,
-                        config=scoring_config,
-                    ),
-                    zefix_score_breakdown=json.dumps(
-                        compute_zefix_score_breakdown(
-                            legal_form=result.legal_form,
-                            legal_form_short_name=result.legal_form_short_name,
-                            capital_nominal=None,
-                            purpose=result.purpose,
-                            branch_offices=None,
-                            industry=_bulk_industry,
-                            status=result.status,
-                            canton=result.canton or canton,
-                            municipality=result.municipality,
-                            config=scoring_config,
-                        )
-                    ),
+                    zefix_score=int(_score_bd["final_score"]),
+                    zefix_score_breakdown=json.dumps(_score_bd),
                     ehraid=result.ehraid,
                     chid=result.chid,
                     legal_seat_id=result.legal_seat_id,
@@ -1307,86 +1228,6 @@ def run_batch_collect(
     return stats
 
 
-# ── Industry re-derivation batch ─────────────────────────────────────────────
-
-def rederive_industry_batch(
-    db: Session,
-    *,
-    canton: str | None = None,
-    industry_filter: str | None = None,
-    min_zefix_score: int | None = None,
-    limit: int | None = None,
-    batch_size: int = 500,
-    resume_from: int = 0,
-    progress_cb: Any = None,
-) -> dict[str, Any]:
-    """Re-derive the industry label for matching companies using the current taxonomy.
-
-    Uses best-match scoring (highest keyword hit count wins) and the configurable
-    taxonomy from app_settings.  Re-computes zefix_score when the industry changes.
-
-    Returns:
-        ``{"updated": int, "unchanged": int, "errors": list[str]}``
-    """
-    stats: dict[str, Any] = {"updated": 0, "unchanged": 0, "errors": []}
-    taxonomy = _load_industry_taxonomy(db)
-    scoring_config = _load_scoring_config(db)
-
-    query = db.query(Company)
-    if canton:
-        query = query.filter(Company.canton == canton)
-    if industry_filter:
-        query = query.filter(Company.industry.ilike(f"%{industry_filter}%"))
-    if min_zefix_score is not None:
-        query = query.filter(Company.zefix_score >= min_zefix_score)
-    query = query.order_by(Company.id.asc())
-    if limit:
-        query = query.limit(limit)
-
-    company_ids = [c.id for c in query.with_entities(Company.id).all()]
-    total = len(company_ids)
-    offset = max(0, min(resume_from, total))
-
-    while offset < total:
-        batch_ids = company_ids[offset: offset + batch_size]
-        batch = db.query(Company).filter(Company.id.in_(batch_ids)).order_by(Company.id.asc()).all()
-
-        for company in batch:
-            try:
-                new_industry = _derive_industry(company.purpose, taxonomy)
-                if new_industry != company.industry:
-                    company.industry = new_industry
-                    score_breakdown = compute_zefix_score_breakdown(
-                        legal_form=company.legal_form,
-                        legal_form_short_name=company.legal_form_short_name,
-                        capital_nominal=company.capital_nominal,
-                        purpose=company.purpose,
-                        branch_offices=company.branch_offices,
-                        industry=new_industry,
-                        status=company.status,
-                        canton=company.canton,
-                        municipality=company.municipality,
-                        lat=company.lat,
-                        lon=company.lon,
-                        purpose_keywords=company.purpose_keywords,
-                        tfidf_cluster=company.tfidf_cluster,
-                        config=scoring_config,
-                    )
-                    company.zefix_score = int(score_breakdown["final_score"])
-                    company.zefix_score_breakdown = json.dumps(score_breakdown)
-                    stats["updated"] += 1
-                else:
-                    stats["unchanged"] += 1
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"{company.uid}: {exc}")
-
-        db.commit()
-        offset += len(batch)
-
-        if progress_cb:
-            progress_cb(min(offset, total), total, stats)
-
-    return stats
 
 
 # ── Claude Haiku classification batch ────────────────────────────────────────
