@@ -55,7 +55,7 @@ class PipelineConfig:
 
     # ── Multi-label assignment ──
     max_clusters_per_company: int = 7   # assign up to this many clusters per company
-    min_similarity: float = 0.10        # cosine similarity threshold; below → Undefined
+    min_similarity: float = 0.15        # cosine similarity threshold; below → Undefined
 
     # ── Labeling ──
     top_terms_per_cluster: int = 5      # terms in each cluster label
@@ -197,13 +197,19 @@ def assign_multi_label(X_reduced, km, cfg: PipelineConfig) -> list[list[int]]:
     centers_norm = normalize(km.cluster_centers_)
     sim_matrix = X_reduced @ centers_norm.T          # (n_companies, n_clusters)
 
-    assignments: list[list[int]] = []
-    for i in range(sim_matrix.shape[0]):
-        sims = sim_matrix[i]
-        ranked = sims.argsort()[::-1][: cfg.max_clusters_per_company]
-        assigned = [int(idx) for idx in ranked if sims[idx] >= cfg.min_similarity]
-        assignments.append(assigned)
+    k = min(cfg.max_clusters_per_company, sim_matrix.shape[1])
+    # Vectorised top-k: argpartition is O(n_clusters) vs argsort O(n_clusters log n_clusters)
+    top_k_unsorted = np.argpartition(sim_matrix, -k, axis=1)[:, -k:]           # (n, k)
+    top_k_sims = sim_matrix[np.arange(sim_matrix.shape[0])[:, None], top_k_unsorted]
+    order = np.argsort(top_k_sims, axis=1)[:, ::-1]                            # sort only k cols
+    sorted_idx = top_k_unsorted[np.arange(top_k_unsorted.shape[0])[:, None], order]
+    sorted_sims = top_k_sims[np.arange(top_k_sims.shape[0])[:, None], order]
 
+    threshold = cfg.min_similarity
+    assignments: list[list[int]] = [
+        [int(sorted_idx[i, j]) for j in range(k) if sorted_sims[i, j] >= threshold]
+        for i in range(sim_matrix.shape[0])
+    ]
     return assignments
 
 
@@ -225,15 +231,18 @@ def label_clusters(
     Returns {cluster_id: "term1,term2,...,termN"}.
     """
     import numpy as np
+    import scipy.sparse as sp
 
     n_features = X_tfidf.shape[1]
+    n_docs = len(hard_labels)
 
-    # Build per-cluster term-sum matrix using hard K-Means assignments
-    cluster_term_sum = np.zeros((n_clusters, n_features))
-    for cid in range(n_clusters):
-        mask = hard_labels == cid
-        if mask.sum() > 0:
-            cluster_term_sum[cid] = np.asarray(X_tfidf[mask].sum(axis=0)).flatten()
+    # Build per-cluster term-sum matrix via sparse one-hot multiply —
+    # one matmul instead of 150 sparse boolean-mask slices
+    one_hot = sp.csr_matrix(
+        (np.ones(n_docs, dtype=np.float32), (hard_labels, np.arange(n_docs))),
+        shape=(n_clusters, n_docs),
+    )
+    cluster_term_sum = np.asarray((one_hot @ X_tfidf).todense())
 
     # c-IDF: penalise terms present in many clusters
     term_presence = (cluster_term_sum > 0).sum(axis=0)
@@ -276,41 +285,54 @@ def extract_company_keywords(
     X_tfidf,
     feature_names,
     cfg: PipelineConfig,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> list[str | None]:
     """Extract top-N TF-IDF keywords from each company's own purpose text.
 
     Uses the same bigram deduplication as label_clusters so results are clean.
     Returns one string (or None) per row in X_tfidf.
+
+    Works directly on the CSR sparse structure to avoid O(n * n_features) dense
+    allocations — only non-zero elements per row are sorted.
     """
     import numpy as np
 
+    X_csr = X_tfidf.tocsr()
     results: list[str | None] = []
     candidates = cfg.top_keywords_per_company * 4
+    n_keep = cfg.top_keywords_per_company
+    total = X_csr.shape[0]
 
-    for i in range(X_tfidf.shape[0]):
-        row = np.asarray(X_tfidf[i].todense()).flatten()
-        if row.max() == 0:
+    for i in range(total):
+        start, end = int(X_csr.indptr[i]), int(X_csr.indptr[i + 1])
+        if start == end:
             results.append(None)
-            continue
+        else:
+            col_indices = X_csr.indices[start:end]   # non-zero feature indices
+            values = X_csr.data[start:end]            # corresponding TF-IDF values
 
-        ranked_idx = row.argsort()[::-1][:candidates]
-        selected: list[str] = []
-        covered: set[str] = set()
+            # Sort only the non-zero elements (typically ~50–200 vs 15 000 dense)
+            order = np.argsort(values)[::-1][:candidates]
+            selected: list[str] = []
+            covered: set[str] = set()
 
-        for j in ranked_idx:
-            if row[j] == 0:
-                break
-            if len(selected) == cfg.top_keywords_per_company:
-                break
-            term = feature_names[j]
-            words = set(term.split())
-            if words.issubset(covered):
-                continue
-            selected.append(term)
-            covered.update(words)
+            for j in order:
+                if len(selected) == n_keep:
+                    break
+                term = feature_names[col_indices[j]]
+                words = set(term.split())
+                if words.issubset(covered):
+                    continue
+                selected.append(term)
+                covered.update(words)
 
-        results.append(",".join(selected) if selected else None)
+            results.append(",".join(selected) if selected else None)
 
+        if progress_cb and i % 5000 == 0:
+            progress_cb(i, total)
+
+    if progress_cb:
+        progress_cb(total, total)
     return results
 
 
@@ -330,32 +352,42 @@ def save_results(
     tfidf_cluster format: "label_a|label_b|label_c" where each label is the
     comma-separated c-TF-IDF terms for that cluster.
     Companies with no cluster above the similarity threshold get "Undefined".
+
+    Uses bulk_update_mappings for a single commit instead of one commit per
+    batch of 200 ORM objects, avoiding SQLAlchemy change-tracking overhead.
     """
+    from app.models.company import Company
+
     stats: dict[str, Any] = {"classified": 0, "undefined": 0, "skipped": 0, "errors": []}
     total = len(companies)
+    mappings: list[dict] = []
 
-    for idx in range(0, total, cfg.db_batch_size):
-        batch = companies[idx: idx + cfg.db_batch_size]
-        batch_assignments = assignments[idx: idx + cfg.db_batch_size]
-        batch_kws = company_keywords[idx: idx + cfg.db_batch_size]
+    for idx, (company, cluster_ids, kw) in enumerate(zip(companies, assignments, company_keywords)):
+        try:
+            if not cluster_ids:
+                tfidf_cluster = "Undefined"
+                stats["undefined"] += 1
+            else:
+                parts = [labels_map[cid] for cid in cluster_ids if cid in labels_map]
+                tfidf_cluster = "|".join(parts) if parts else "Undefined"
+                stats["classified"] += 1
+            mappings.append({"id": company.id, "tfidf_cluster": tfidf_cluster, "purpose_keywords": kw})
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid}: {exc}")
+            stats["skipped"] += 1
 
-        for company, cluster_ids, kw in zip(batch, batch_assignments, batch_kws):
-            try:
-                company.purpose_keywords = kw
-                if not cluster_ids:
-                    company.tfidf_cluster = "Undefined"
-                    stats["undefined"] += 1
-                else:
-                    parts = [labels_map[cid] for cid in cluster_ids if cid in labels_map]
-                    company.tfidf_cluster = "|".join(parts) if parts else "Undefined"
-                    stats["classified"] += 1
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"{company.uid}: {exc}")
-                stats["skipped"] += 1
+        if len(mappings) >= cfg.db_batch_size:
+            db.bulk_update_mappings(Company, mappings)
+            db.commit()
+            mappings.clear()
+            if progress_cb:
+                progress_cb(min(idx + 1, total), total, stats)
 
+    if mappings:
+        db.bulk_update_mappings(Company, mappings)
         db.commit()
         if progress_cb:
-            progress_cb(min(idx + cfg.db_batch_size, total), total, stats)
+            progress_cb(total, total, stats)
 
     return stats
 
@@ -454,9 +486,12 @@ def run_pipeline(
     }
     t_total = time.time()
 
-    # ── Load companies ──
+    # ── Load companies — fetch only the 3 fields we need ──
     t0 = time.time()
-    q = db.query(Company).filter(Company.purpose.isnot(None))
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose)
+        .filter(Company.purpose.isnot(None))
+    )
     if canton:
         q = q.filter(Company.canton == canton.upper())
     if industry:
@@ -468,7 +503,7 @@ def run_pipeline(
     q = q.order_by(Company.id.asc())
     if limit:
         q = q.limit(limit)
-    companies = q.all()
+    companies = q.all()   # list of (id, uid, purpose) named tuples
     logger.info(f"[1/7] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
     if not companies:
         return stats
@@ -510,13 +545,24 @@ def run_pipeline(
     labels_map = label_clusters(km.labels_, X_tfidf, feature_names, actual_k, cfg)
     logger.info(f"[6/7] Labeling done in {time.time()-t5:.1f}s")
 
-    # ── Step 5b: Multi-label assignment + per-doc keywords ──
+    # ── Step 5b: Multi-label assignment ──
     t5b = time.time()
     if progress_cb:
         progress_cb(0, len(companies), {**stats, "step": "assigning"})
     assignments = assign_multi_label(X_reduced, km, cfg)
-    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg)
-    logger.info(f"[6b/7] Assignment + keywords done in {time.time()-t5b:.1f}s")
+    logger.info(f"[6b/7] Assignment done in {time.time()-t5b:.1f}s")
+
+    # ── Step 5c: Per-doc keyword extraction ──
+    t5c = time.time()
+
+    def _kw_cb(done: int, total: int) -> None:
+        if progress_cb:
+            progress_cb(done, total, {**stats, "step": "keywords"})
+
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "keywords"})
+    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+    logger.info(f"[6c/7] Keywords done in {time.time()-t5c:.1f}s")
 
     # Summary: count how many companies reference each cluster label
     from collections import Counter
