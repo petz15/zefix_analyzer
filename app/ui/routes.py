@@ -1294,6 +1294,14 @@ def _run_job(app, job_id: int) -> None:
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
         except Exception as exc:  # noqa: BLE001
             err = traceback.format_exc()
+            # Roll back any failed transaction so the session is usable again.
+            # Without this, accessing job.id triggers a lazy load on a session
+            # that is in PendingRollbackError, causing a second crash that
+            # silences the original error in the UI.
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
             logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
             crud.mark_failed(db, job, error=err)
             crud.create_event(db, job_id=job.id, level="error", message=err)
