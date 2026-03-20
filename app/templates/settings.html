@@ -306,6 +306,29 @@
     <button type="submit" class="secondary">Analyze cross-cluster terms</button>
   </form>
 
+  <form method="post" action="/ui/classify/recompute-keywords" style="margin-top:0.75rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Recompute <code>purpose_keywords</code> without re-clustering. Runs lemmatization + TF-IDF
+      only — <code>tfidf_cluster</code> is left unchanged. Use this after tuning stopwords or
+      bigram/score settings, or before a keyword-mode cluster run.
+    </p>
+    <div class="filter-grid" style="margin-bottom:0.6rem;">
+      <label class="form-label"><span>Keywords per company</span>
+        <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
+      </label>
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+      </label>
+      <label class="form-label"><span>Industry filter</span>
+        <input type="text" name="industry" placeholder="leave empty = all">
+      </label>
+      <label class="form-label"><span>Limit (companies)</span>
+        <input type="number" name="limit" placeholder="leave empty = all">
+      </label>
+    </div>
+    <button type="submit" class="secondary">Recompute purpose_keywords</button>
+  </form>
+
   <form method="post" action="/ui/classify/claude" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and

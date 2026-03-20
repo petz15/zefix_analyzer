@@ -485,6 +485,101 @@ def analyze_cross_cluster_terms(
     return output_path
 
 
+# ── Keyword-only recompute ────────────────────────────────────────────────────
+
+def recompute_keywords(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    canton: str | None = None,
+    industry: str | None = None,
+    limit: int | None = None,
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Recompute purpose_keywords without re-clustering.
+
+    Runs only: load → lemmatize → TF-IDF → extract keywords → save.
+    tfidf_cluster is left untouched.
+
+    Returns a stats dict with keys: updated, skipped, errors.
+    """
+    from app.models.company import Company
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
+    t_total = time.time()
+
+    # ── Load ──
+    t0 = time.time()
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose)
+        .filter(Company.purpose.isnot(None))
+    )
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+    if industry:
+        q = q.filter(Company.industry.ilike(f"%{industry}%"))
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
+    logger.info(f"[1/3] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
+    if not companies:
+        return stats
+
+    # ── Lemmatize ──
+    t1 = time.time()
+
+    def _prep_cb(done: int, total: int) -> None:
+        if progress_cb:
+            progress_cb(done, total, {**stats, "step": "lemmatizing"})
+
+    cleaned = preprocess_texts([c.purpose or "" for c in companies], cfg, progress_cb=_prep_cb)
+    logger.info(f"[2/3] Lemmatization done in {time.time()-t1:.1f}s")
+
+    # ── TF-IDF + keyword extraction ──
+    t2 = time.time()
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "keywords"})
+    vectorizer, X_tfidf = vectorize(cleaned, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+
+    def _kw_cb(done: int, total: int) -> None:
+        if progress_cb:
+            progress_cb(done, total, {**stats, "step": "keywords"})
+
+    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+    logger.info(f"[3/3] Keywords extracted in {time.time()-t2:.1f}s")
+
+    # ── Save (purpose_keywords only) ──
+    mappings: list[dict] = []
+    for company, kw in zip(companies, company_keywords):
+        try:
+            mappings.append({"id": company.id, "purpose_keywords": kw})
+            stats["updated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid}: {exc}")
+            stats["skipped"] += 1
+
+        if len(mappings) >= cfg.db_batch_size:
+            db.bulk_update_mappings(Company, mappings)
+            db.commit()
+            mappings.clear()
+            if progress_cb:
+                progress_cb(stats["updated"], len(companies), stats)
+
+    if mappings:
+        db.bulk_update_mappings(Company, mappings)
+        db.commit()
+        if progress_cb:
+            progress_cb(stats["updated"], len(companies), stats)
+
+    logger.info(f"Keyword recompute done in {time.time()-t_total:.1f}s — {stats['updated']} updated")
+    return stats
+
+
 # ── Main Pipeline ─────────────────────────────────────────────────────────────
 
 def run_pipeline(

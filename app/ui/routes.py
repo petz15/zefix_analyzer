@@ -978,6 +978,26 @@ def start_cluster_analysis(
     return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Analysis queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/ui/classify/recompute-keywords", include_in_schema=False)
+def start_recompute_keywords(
+    request: Request,
+    top_keywords_per_company: str = Form("10"),
+    canton: str = Form(""),
+    industry: str = Form(""),
+    limit: str = Form(""),
+) -> RedirectResponse:
+    params: dict = {
+        "top_keywords_per_company": _parse_optional_int(top_keywords_per_company) or 10,
+        "canton": canton.strip() or None,
+        "industry": industry.strip() or None,
+        "limit": _parse_optional_int(limit),
+    }
+    job, err = _enqueue_job_safe(request, job_type="recompute_keywords", label="Recompute purpose_keywords", params=params)
+    if err:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Keyword recompute queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/ui/classify/claude", include_in_schema=False)
 def start_claude_classify(
     request: Request,
@@ -1235,6 +1255,27 @@ def _run_job(app, job_id: int) -> None:
                 classified = stats.get("classified", 0)
                 noise = stats.get("noise", 0)
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
+
+            elif job.job_type == "recompute_keywords":
+                from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"[{stats.get('step', 'keywords')}] {done}/{total} — {stats.get('updated', 0)} updated"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                cfg = PipelineConfig(
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
+                )
+                stats = recompute_keywords(
+                    db, cfg,
+                    canton=params.get("canton") or None,
+                    industry=params.get("industry") or None,
+                    limit=int(params["limit"]) if params.get("limit") else None,
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['updated']} keywords updated, {stats['skipped']} skipped"
 
             elif job.job_type == "cluster_analysis":
                 from app.services.cluster_pipeline import PipelineConfig, analyze_cross_cluster_terms
