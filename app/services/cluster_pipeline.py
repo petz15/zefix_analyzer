@@ -61,6 +61,9 @@ class PipelineConfig:
     # ── Labeling ──
     top_terms_per_cluster: int = 5      # terms in each cluster label
     top_keywords_per_company: int = 10  # stored in purpose_keywords
+    min_keyword_score: float = 0.01     # TF-IDF score floor; terms below this are dropped
+    bigram_penalty: float = 0.85        # score multiplier for bigrams before ranking;
+                                        # <1.0 lets unigrams compete against inflated bigram IDF
 
     # ── Cross-cluster analysis ──
     analysis_top_clusters: int = 20
@@ -302,6 +305,8 @@ def extract_company_keywords(
     results: list[str | None] = []
     candidates = cfg.top_keywords_per_company * 4
     n_keep = cfg.top_keywords_per_company
+    min_score = cfg.min_keyword_score
+    bigram_penalty = cfg.bigram_penalty
     total = X_csr.shape[0]
 
     for i in range(total):
@@ -310,7 +315,14 @@ def extract_company_keywords(
             results.append(None)
         else:
             col_indices = X_csr.indices[start:end]   # non-zero feature indices
-            values = X_csr.data[start:end]            # corresponding TF-IDF values
+            values = X_csr.data[start:end].copy()     # corresponding TF-IDF values
+
+            # Apply bigram penalty before ranking so unigrams compete fairly
+            # (bigrams get inflated IDF because they're rare, but unigrams are
+            # often more meaningful in German where compounds are single tokens)
+            for k, ci in enumerate(col_indices):
+                if " " in feature_names[ci]:
+                    values[k] *= bigram_penalty
 
             # Sort only the non-zero elements (typically ~50–200 vs 15 000 dense)
             order = np.argsort(values)[::-1][:candidates]
@@ -320,6 +332,8 @@ def extract_company_keywords(
             for j in order:
                 if len(selected) == n_keep:
                     break
+                if values[j] < min_score:
+                    break  # remaining scores are even lower (sorted desc)
                 term = feature_names[col_indices[j]]
                 words = set(term.split())
                 if words.issubset(covered):
@@ -589,16 +603,22 @@ def run_pipeline(
     logger.info(f"[6b/7] Assignment done in {time.time()-t5b:.1f}s")
 
     # ── Step 5c: Per-doc keyword extraction ──
+    # Skipped when use_keywords=True: the TF-IDF matrix was built from the
+    # already-extracted keywords, so re-extracting from it would be circular
+    # and would overwrite purpose_keywords with degraded values.
     t5c = time.time()
+    if use_keywords:
+        company_keywords = [c.purpose_keywords for c in companies]
+        logger.info("[6c/7] Keyword extraction skipped (use_keywords=True — keeping existing purpose_keywords)")
+    else:
+        def _kw_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "keywords"})
 
-    def _kw_cb(done: int, total: int) -> None:
         if progress_cb:
-            progress_cb(done, total, {**stats, "step": "keywords"})
-
-    if progress_cb:
-        progress_cb(0, len(companies), {**stats, "step": "keywords"})
-    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
-    logger.info(f"[6c/7] Keywords done in {time.time()-t5c:.1f}s")
+            progress_cb(0, len(companies), {**stats, "step": "keywords"})
+        company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+        logger.info(f"[6c/7] Keywords done in {time.time()-t5c:.1f}s")
 
     # Summary: count how many companies reference each cluster label
     from collections import Counter

@@ -88,6 +88,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "dazugehörig", "dazugehörigen", "dazugehörigem",
     "darlehen", "immaterialgüter", "immaterialgüt", "anderer", "zusammenhängen", "bezwecken", 
     "einschliesslich", "einschließlich", "einschl", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
+    "jeglicher", "zusammenhängende", "zusammenhängenden", "zusammenhängendem", "weiterveräussern", 
+    "dritter", "dritten", "dritter", "dritten", "dritter", "dritten", "weit"
 
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
@@ -231,7 +233,7 @@ _TFIDF_STOPWORDS: set[str] = {
     "gunst",
     "anderer geschäft",
     "fiduziarisch jeglicher", "geschäft entwickeln",
-    
+
 
     # ── Holding/intercompany boilerplate (Cash-Pooling, interco financing) ────
     "überdies",                                          # "Die Gesellschaft kann überdies..."
