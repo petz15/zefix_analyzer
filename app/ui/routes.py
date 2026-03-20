@@ -1228,6 +1228,7 @@ def _run_job(app, job_id: int) -> None:
                     min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
                     max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
                     limit=int(params["limit"]) if params.get("limit") else None,
+                    use_keywords=bool(params.get("use_keywords", False)),
                     progress_cb=_progress,
                 )
                 n_c = stats.get("n_clusters", 0)

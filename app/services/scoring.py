@@ -28,6 +28,7 @@ _DIRECTORY_DOMAINS = {
     "tiger.ch",
     "help.ch",
     "kompass.ch",
+    "spheriq.ch",
     
 }
 

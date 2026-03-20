@@ -280,6 +280,10 @@
           <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
           <small class="muted">Top TF-IDF keywords from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
         </label>
+        <label class="form-label"><span>Cluster on keywords</span>
+          <input type="checkbox" name="use_keywords" value="1">
+          <small class="muted">Use pre-extracted <code>purpose_keywords</code> as input instead of raw purpose text. Skips lemmatization — produces cleaner, less boilerplate-heavy clusters. Requires a prior pipeline run to have populated <code>purpose_keywords</code>.</small>
+        </label>
       </div>
     </details>
     <button type="submit">Run HDBSCAN clustering</button>

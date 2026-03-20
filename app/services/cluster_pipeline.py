@@ -482,9 +482,16 @@ def run_pipeline(
     min_zefix_score: int | None = None,
     max_zefix_score: int | None = None,
     limit: int | None = None,
+    use_keywords: bool = False,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full K-Means multi-label clustering pipeline end-to-end.
+
+    use_keywords: if True, cluster on each company's pre-extracted purpose_keywords
+      (comma-separated TF-IDF terms already stored in DB) instead of the raw purpose
+      text. This skips spaCy lemmatization and produces cleaner, more distinct clusters
+      because boilerplate legal language is already filtered out. Falls back to raw
+      purpose text for companies where purpose_keywords is NULL.
 
     Returns a stats dict with keys:
       classified, undefined, skipped, n_clusters, errors, summary, analysis_file
@@ -500,10 +507,10 @@ def run_pipeline(
     }
     t_total = time.time()
 
-    # ── Load companies — fetch only the 3 fields we need ──
+    # ── Load companies — fetch only the fields we need ──
     t0 = time.time()
     q = (
-        db.query(Company.id, Company.uid, Company.purpose)
+        db.query(Company.id, Company.uid, Company.purpose, Company.purpose_keywords)
         .filter(Company.purpose.isnot(None))
     )
     if canton:
@@ -517,22 +524,37 @@ def run_pipeline(
     q = q.order_by(Company.id.asc())
     if limit:
         q = q.limit(limit)
-    companies = q.all()   # list of (id, uid, purpose) named tuples
+    companies = q.all()   # list of (id, uid, purpose, purpose_keywords) named tuples
     logger.info(f"[1/7] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
     if not companies:
         return stats
 
-    purposes = [c.purpose or "" for c in companies]
-
-    # ── Step 1: Preprocessing ──
+    # ── Step 1: Build input texts ──
     t1 = time.time()
+    if use_keywords:
+        # Use pre-extracted per-company TF-IDF keywords (comma-separated terms).
+        # These are already lemmatized and domain-stopword-filtered, so no spaCy needed.
+        # Companies missing purpose_keywords fall back to raw purpose text.
+        n_keywords = sum(1 for c in companies if c.purpose_keywords)
+        n_fallback = len(companies) - n_keywords
+        logger.info(
+            f"[2/7] use_keywords=True — {n_keywords} from keywords, "
+            f"{n_fallback} falling back to purpose text"
+        )
+        cleaned = [
+            c.purpose_keywords.replace(",", " ") if c.purpose_keywords else (c.purpose or "")
+            for c in companies
+        ]
+        logger.info(f"[2/7] Input texts ready in {time.time()-t1:.1f}s (no lemmatization)")
+    else:
+        purposes = [c.purpose or "" for c in companies]
 
-    def _prep_cb(done: int, total: int) -> None:
-        if progress_cb:
-            progress_cb(done, total, {**stats, "step": "lemmatizing"})
+        def _prep_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "lemmatizing"})
 
-    cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
-    logger.info(f"[2/7] Lemmatization done in {time.time()-t1:.1f}s")
+        cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
+        logger.info(f"[2/7] Lemmatization done in {time.time()-t1:.1f}s")
 
     # ── Step 2: TF-IDF ──
     t2 = time.time()

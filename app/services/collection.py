@@ -126,7 +126,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "pfandrecht", "pfandrechte", "verpfändung", "verpfänden",                 # "Verpfändung von Vermögen"
     "mittels",
     "aktiven", "aktiven", "passiven", "passiven", "beteiligungen", "beteiligen",
-    "aktionär", "aktionäre", ""
+    "aktionär", "aktionäre", "dritter", "dritten",
+    "fremd", "finanzierung", "geschäft",
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -168,6 +169,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "übrig können",
     "übrig kommerziell",
     "übrig immaterialgüterrecht",
+    "immaterialgüterrecht",
+    "ausländisch",
     "übrig geschäft",
     "übrig finanzierung",
     "übrig",
@@ -227,6 +230,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "darlehen verpflichtung",
     "gunst",
     "anderer geschäft",
+    "fiduziarisch jeglicher", "geschäft entwickeln",
+    
 
     # ── Holding/intercompany boilerplate (Cash-Pooling, interco financing) ────
     "überdies",                                          # "Die Gesellschaft kann überdies..."
