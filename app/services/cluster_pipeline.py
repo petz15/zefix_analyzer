@@ -56,6 +56,7 @@ class PipelineConfig:
     # ── Multi-label assignment ──
     max_clusters_per_company: int = 7   # assign up to this many clusters per company
     min_similarity: float = 0.15        # cosine similarity threshold; below → Undefined
+    label_dedup_threshold: float = 0.6  # Jaccard overlap above this → skip duplicate label
 
     # ── Labeling ──
     top_terms_per_cluster: int = 5      # terms in each cluster label
@@ -368,7 +369,20 @@ def save_results(
                 tfidf_cluster = "Undefined"
                 stats["undefined"] += 1
             else:
-                parts = [labels_map[cid] for cid in cluster_ids if cid in labels_map]
+                parts: list[str] = []
+                covered_terms: set[str] = set()
+                threshold = cfg.label_dedup_threshold
+                for cid in cluster_ids:
+                    if cid not in labels_map:
+                        continue
+                    label = labels_map[cid]
+                    label_terms = {t.strip() for t in label.split(",")}
+                    if covered_terms:
+                        overlap = len(label_terms & covered_terms) / len(label_terms)
+                        if overlap >= threshold:
+                            continue
+                    parts.append(label)
+                    covered_terms |= label_terms
                 tfidf_cluster = "|".join(parts) if parts else "Undefined"
                 stats["classified"] += 1
             mappings.append({"id": company.id, "tfidf_cluster": tfidf_cluster, "purpose_keywords": kw})
