@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,7 @@ from app.schemas.company import CompanyCreate, CompanyUpdate
 from app.services.scoring import (
     compute_zefix_score_breakdown,
     distance_to_muri_km,
+    distance_to_origin_km,
     fallback_result_score,
     get_default_scoring_config,
     is_irrelevant_result,
@@ -259,6 +261,28 @@ _TFIDF_STOPWORDS: set[str] = {
     "finanziell", "finanzielle", "finanziellen",         # "finanziellen Geschäfte"
     "tätigen",                                           # "Geschäfte tätigen" — too generic
 }
+
+_SENTENCE_SPLIT = re.compile(r'(?<=\.)\s+(?=[A-ZÄÖÜ])')
+
+
+def strip_purpose_boilerplate(text: str, patterns: list[re.Pattern]) -> str:
+    """Remove boilerplate sentences from purpose text using DB-loaded patterns.
+
+    Splits on sentence boundaries (period + capital letter), drops any sentence
+    matching a pattern, and rejoins the rest.  Falls back to the original text
+    if everything would be stripped.
+    """
+    if not text or len(text) < 40 or not patterns:
+        return text
+
+    sentences = _SENTENCE_SPLIT.split(text.strip())
+    kept = [
+        s for s in sentences
+        if s.strip() and not any(pat.search(s) for pat in patterns)
+    ]
+    result = " ".join(kept).strip()
+    return result if result else text
+
 
 # Default system prompt for Claude classification
 _DEFAULT_CLAUDE_PROMPT = """\
@@ -704,7 +728,13 @@ def recalculate_google_scores(
     offset = max(0, min(resume_from, total))
 
     while True:
-        batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        batch = (
+            db.query(Company)
+            .order_by(Company.zefix_score.desc().nullslast(), Company.id.asc())
+            .offset(offset)
+            .limit(batch_size)
+            .all()
+        )
         if not batch:
             break
 
@@ -1294,16 +1324,19 @@ def claude_classify_batch(
     api_key: str | None = None,
     resume_from: int = 0,
     use_batch_api: bool = False,
+    companies_per_message: int = 1,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Classify companies using Claude Haiku and store a lead-quality score + category.
 
-    When ``use_batch_api=True`` all requests are submitted as a single Anthropic
-    Message Batch (50 % cheaper).  The call blocks while polling for completion
-    and processes results once the batch ends.
+    ``companies_per_message`` controls how many companies are packed into a single
+    API call (default 1).  Higher values (e.g. 10–20) amortise the system prompt
+    across multiple companies, significantly reducing input token costs.  The
+    system prompt is also always sent with ``cache_control: ephemeral`` so that
+    repeated identical prompts are served from cache at ~10 % of normal cost.
 
-    When ``use_batch_api=False`` (default) each company is sent individually in
-    a tight loop (~6 req/s).
+    ``use_batch_api=True`` submits all requests as a single Anthropic Message Batch
+    (50 % discount on top).  The call blocks while polling for completion.
 
     Returns:
         ``{"classified": int, "skipped": int, "errors": list[str],
@@ -1326,6 +1359,25 @@ def claude_classify_batch(
     else:
         prompt = base_prompt
 
+    companies_per_message = max(1, companies_per_message)
+
+    # When sending multiple companies per message, append the array-output instruction.
+    if companies_per_message > 1:
+        prompt = (
+            prompt
+            + '\n\nYou will receive multiple companies separated by "---".'
+            + " Output ONLY a JSON array with one object per company in the same order,"
+            + ' each with "score" (0-100) and "category".'
+        )
+
+    # Wrap system in list with cache_control so the prompt is cached after the first
+    # call — subsequent calls pay ~10% of normal input token price for the cached prefix.
+    system_param: list[dict] = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
+
+    scoring_config = _load_scoring_config(db)
+    origin_lat = float(scoring_config.get("scoring_origin_lat", 46.9266))
+    origin_lon = float(scoring_config.get("scoring_origin_lon", 7.4817))
+
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if canton:
         query = query.filter(Company.canton == canton)
@@ -1334,15 +1386,25 @@ def claude_classify_batch(
     if max_zefix_score is not None:
         query = query.filter(Company.zefix_score <= max_zefix_score)
 
-    companies = query.order_by(Company.id.asc()).limit(limit).all()
+    all_candidates = query.all()
+    all_candidates.sort(key=lambda c: (
+        -(c.zefix_score if c.zefix_score is not None else -1),
+        distance_to_origin_km(origin_lat, origin_lon, canton=c.canton, municipality=c.municipality, lat=c.lat, lon=c.lon) or float("inf"),
+        c.id,
+    ))
+    companies = all_candidates[:limit]
     total = len(companies)
     offset = max(0, min(resume_from, total))
     selected = companies[offset:]
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
+    # Load active boilerplate patterns from DB once for the whole run
+    _boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
+
     def _build_user_text(company: Company) -> str:
-        parts = [f"Company: {company.name}", f"Purpose: {company.purpose}"]
+        purpose = strip_purpose_boilerplate(company.purpose or "", _boilerplate_patterns)
+        parts = [f"Company: {company.name}", f"Purpose: {purpose}"]
         if company.purpose_keywords:
             parts.append(f"Keywords: {company.purpose_keywords}")
         if company.tfidf_cluster and company.tfidf_cluster != "Undefined":
@@ -1355,38 +1417,61 @@ def claude_classify_batch(
             parts.append("Note: only social media presence found — no company website")
         return "\n".join(parts)
 
-    def _apply_response(company: Company, response_text: str) -> None:
-        """Parse JSON response and write score/category back to the company ORM object."""
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-        data = json.loads(response_text)
+    def _strip_fences(text: str) -> str:
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return text.strip()
+
+    def _apply_single(company: Company, response_text: str) -> None:
+        data = json.loads(_strip_fences(response_text))
         company.claude_score = max(0, min(100, int(data.get("score", 0))))
         company.claude_category = str(data.get("category", ""))[:128]
         company.claude_scored_at = datetime.now(tz=timezone.utc)
 
+    def _apply_chunk(chunk: list[Company], response_text: str) -> None:
+        data = json.loads(_strip_fences(response_text))
+        if not isinstance(data, list):
+            raise ValueError(f"Expected JSON array, got {type(data).__name__}: {response_text!r}")
+        now = datetime.now(tz=timezone.utc)
+        for company, item in zip(chunk, data):
+            company.claude_score = max(0, min(100, int(item.get("score", 0))))
+            company.claude_category = str(item.get("category", ""))[:128]
+            company.claude_scored_at = now
+
+    def _chunk_ids(chunk: list[Company]) -> str:
+        return ", ".join(c.uid for c in chunk)
+
+    # Group selected companies into chunks of `companies_per_message`
+    chunks: list[list[Company]] = [
+        selected[i: i + companies_per_message]
+        for i in range(0, len(selected), companies_per_message)
+    ]
+
     # ── Batch API path ────────────────────────────────────────────────────────
 
     if use_batch_api:
-        def _batch_id(uid: str) -> str:
-            """Sanitize a Zefix UID for use as a batch custom_id (dots not allowed)."""
-            return uid.replace(".", "_")[:64]
+        def _batch_custom_id(idx: int, chunk: list[Company]) -> str:
+            if len(chunk) == 1:
+                return chunk[0].uid.replace(".", "_")[:64]
+            return f"chunk_{idx}"
 
-        uid_map: dict[str, Company] = {_batch_id(c.uid): c for c in selected}
-
-        requests_list = [
-            {
-                "custom_id": _batch_id(company.uid),
+        chunk_map: dict[str, list[Company]] = {}
+        requests_list = []
+        for idx, chunk in enumerate(chunks):
+            cid = _batch_custom_id(idx, chunk)
+            chunk_map[cid] = chunk
+            content = _build_user_text(chunk[0]) if len(chunk) == 1 else "\n---\n".join(_build_user_text(c) for c in chunk)
+            requests_list.append({
+                "custom_id": cid,
                 "params": {
                     "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 128,
-                    "system": prompt,
-                    "messages": [{"role": "user", "content": _build_user_text(company)}],
+                    "max_tokens": 128 * len(chunk),
+                    "system": system_param,
+                    "messages": [{"role": "user", "content": content}],
                 },
-            }
-            for company in selected
-        ]
+            })
 
         if not requests_list:
             return stats
@@ -1397,37 +1482,38 @@ def claude_classify_batch(
         if progress_cb:
             progress_cb(0, total, stats)
 
-        # Poll until the batch ends
         while batch.processing_status != "ended":
             time.sleep(15)
             batch = client.beta.messages.batches.retrieve(batch.id)
             counts = batch.request_counts
             done_so_far = (counts.succeeded or 0) + (counts.errored or 0)
             if progress_cb:
-                progress_cb(done_so_far, total, stats)
+                progress_cb(min(done_so_far * companies_per_message, total), total, stats)
 
-        # Process results
         for result in client.beta.messages.batches.results(batch.id):
-            company = uid_map.get(result.custom_id)
-            if company is None:
+            chunk = chunk_map.get(result.custom_id)
+            if chunk is None:
                 continue
             if result.result.type == "succeeded":
                 response_text = result.result.message.content[0].text.strip()
                 stats["input_tokens"] += result.result.message.usage.input_tokens
                 stats["output_tokens"] += result.result.message.usage.output_tokens
                 try:
-                    _apply_response(company, response_text)
-                    stats["classified"] += 1
+                    if len(chunk) == 1:
+                        _apply_single(chunk[0], response_text)
+                    else:
+                        _apply_chunk(chunk, response_text)
+                    stats["classified"] += len(chunk)
                 except json.JSONDecodeError as exc:
-                    stats["errors"].append(f"{result.custom_id}: JSON parse error — raw: {response_text!r} — {exc}")
-                    stats["skipped"] += 1
+                    stats["errors"].append(f"{_chunk_ids(chunk)}: JSON parse error — raw: {response_text!r} — {exc}")
+                    stats["skipped"] += len(chunk)
                 except Exception as exc:  # noqa: BLE001
-                    stats["errors"].append(f"{result.custom_id}: {type(exc).__name__}: {exc}")
-                    stats["skipped"] += 1
+                    stats["errors"].append(f"{_chunk_ids(chunk)}: {type(exc).__name__}: {exc}")
+                    stats["skipped"] += len(chunk)
             else:
                 err_info = getattr(result.result, "error", result.result.type)
-                stats["errors"].append(f"{result.custom_id}: batch error — {err_info}")
-                stats["skipped"] += 1
+                stats["errors"].append(f"{_chunk_ids(chunk)}: batch error — {err_info}")
+                stats["skipped"] += len(chunk)
 
         db.commit()
         if progress_cb:
@@ -1436,33 +1522,38 @@ def claude_classify_batch(
 
     # ── Per-request path (default) ────────────────────────────────────────────
 
-    for i, company in enumerate(selected, start=offset + 1):
+    for i, chunk in enumerate(chunks):
+        done = offset + i * companies_per_message + len(chunk)
         try:
+            content = _build_user_text(chunk[0]) if len(chunk) == 1 else "\n---\n".join(_build_user_text(c) for c in chunk)
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=128,
-                system=prompt,
-                messages=[{"role": "user", "content": _build_user_text(company)}],
+                max_tokens=128 * len(chunk),
+                system=system_param,
+                messages=[{"role": "user", "content": content}],
             )
             response_text = msg.content[0].text.strip()
             stats["input_tokens"] += msg.usage.input_tokens
             stats["output_tokens"] += msg.usage.output_tokens
-            _apply_response(company, response_text)
-            stats["classified"] += 1
+            if len(chunk) == 1:
+                _apply_single(chunk[0], response_text)
+            else:
+                _apply_chunk(chunk, response_text)
+            stats["classified"] += len(chunk)
 
         except json.JSONDecodeError as exc:
-            stats["errors"].append(f"{company.uid}: JSON parse error — raw: {response_text!r} — {exc}")
-            stats["skipped"] += 1
+            stats["errors"].append(f"{_chunk_ids(chunk)}: JSON parse error — raw: {response_text!r} — {exc}")
+            stats["skipped"] += len(chunk)
         except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
-            stats["skipped"] += 1
+            stats["errors"].append(f"{_chunk_ids(chunk)}: {type(exc).__name__}: {exc}")
+            stats["skipped"] += len(chunk)
 
-        if i % 50 == 0:
+        if done % 50 < companies_per_message or done >= total:
             db.commit()
             if progress_cb:
-                progress_cb(i, total, stats)
+                progress_cb(min(done, total), total, stats)
 
-        time.sleep(0.15)  # ~6 req/s — well within Haiku rate limits
+        time.sleep(0.15)
 
     db.commit()
     if progress_cb:

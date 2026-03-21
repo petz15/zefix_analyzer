@@ -375,6 +375,20 @@ def distance_to_muri_km(
     return _haversine_km(_ORIGIN[0], _ORIGIN[1], coords[0], coords[1]) if coords else None
 
 
+def distance_to_origin_km(
+    origin_lat: float,
+    origin_lon: float,
+    *,
+    canton: str | None,
+    municipality: str | None,
+    lat: float | None = None,
+    lon: float | None = None,
+) -> float | None:
+    """Return distance in km from a configurable origin to the company's resolved coordinates."""
+    coords = _resolve_coords(canton, municipality, lat, lon)
+    return _haversine_km(origin_lat, origin_lon, coords[0], coords[1]) if coords else None
+
+
 # ── Individual scoring ───────────────────────────────────────────────────────
 
 _DEFAULT_SCORING_CONFIG: dict[str, str] = {

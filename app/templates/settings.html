@@ -351,7 +351,7 @@
     <p class="muted" style="margin: 0 0 0.6rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
       <code>claude_category</code> per company. Requires an Anthropic API key (set above).
-      Per-request cost: ~$0.25 / 1 000 companies. Batch API cost: ~$0.12 / 1 000 companies.
+      Per-request: ~$0.25 / 1k companies (1 company/msg). With 10 companies/msg + prompt caching: ~$0.03–0.05 / 1k. Batch API adds another ~50% discount.
     </p>
     <div class="filter-grid" style="margin-bottom:0.6rem;">
       <label class="form-label"><span>Canton</span>
@@ -365,6 +365,11 @@
       </label>
       <label class="form-label"><span>Max companies</span>
         <input type="number" name="limit" value="500">
+      </label>
+      <label class="form-label">
+        <span>Companies per message</span>
+        <input type="number" name="companies_per_message" value="10" min="1" max="50">
+        <small class="muted">Pack N companies into one API call (reduces prompt overhead). 10–20 recommended.</small>
       </label>
     </div>
     <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">

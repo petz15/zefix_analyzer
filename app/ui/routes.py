@@ -1007,6 +1007,7 @@ def start_claude_classify(
     limit: str = Form("500"),
     system_prompt: str = Form(""),
     use_batch_api: str = Form("false"),
+    companies_per_message: str = Form("1"),
 ) -> RedirectResponse:
     params: dict = {"limit": _parse_optional_int(limit) or 500}
     if canton.strip():
@@ -1021,6 +1022,9 @@ def start_claude_classify(
         params["system_prompt"] = system_prompt.strip()
     if use_batch_api == "true":
         params["use_batch_api"] = True
+    cpm = _parse_optional_int(companies_per_message)
+    if cpm and cpm > 1:
+        params["companies_per_message"] = cpm
 
     label = f"Claude classify ({params['limit']} companies)" + (" [batch]" if params.get("use_batch_api") else "")
     job, err = _enqueue_job_safe(request, job_type="claude_classify", label=label, params=params)
@@ -1310,6 +1314,7 @@ def _run_job(app, job_id: int) -> None:
                     api_key=crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key,
                     resume_from=resume_from,
                     use_batch_api=bool(params.get("use_batch_api", False)),
+                    companies_per_message=int(params.get("companies_per_message", 1)),
                     progress_cb=_progress,
                 )
                 tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)

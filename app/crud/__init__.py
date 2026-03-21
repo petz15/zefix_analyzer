@@ -1,4 +1,12 @@
 from app.crud.app_setting import get_all_settings, get_setting, seed_defaults, set_setting
+from app.crud.boilerplate import (
+    create_boilerplate_pattern,
+    delete_boilerplate_pattern,
+    get_active_boilerplate_patterns,
+    get_boilerplate_pattern,
+    list_boilerplate_patterns,
+    update_boilerplate_pattern,
+)
 from app.crud.audit_log import (
     create_audit_entry,
     list_audit_for_company,
@@ -107,6 +115,13 @@ __all__ = [
     "count_users",
     "create_user",
     "authenticate",
+    # boilerplate
+    "list_boilerplate_patterns",
+    "get_boilerplate_pattern",
+    "get_active_boilerplate_patterns",
+    "create_boilerplate_pattern",
+    "update_boilerplate_pattern",
+    "delete_boilerplate_pattern",
     # audit log
     "create_audit_entry",
     "record_company_changes",
