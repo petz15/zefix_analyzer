@@ -379,4 +379,79 @@
     <button type="submit">Run Claude classification</button>
   </form>
 </section>
+
+<section class="card" style="margin-top:1.5rem;">
+  <h3 style="margin:0 0 0.4rem;">Purpose Boilerplate Patterns</h3>
+  <p class="muted" style="margin:0 0 0.8rem;">
+    Regex patterns applied to company purpose text <em>before</em> it is sent to Claude.
+    Sentences matching an active pattern are stripped, reducing input tokens for generic
+    Swiss registry filler clauses. Patterns are case-insensitive.
+    Use <code>scripts/analyze_boilerplate.py --insert</code> to discover candidates from
+    the actual data, or add patterns manually below.
+  </p>
+
+  {% if boilerplate_patterns %}
+  <table style="width:100%; border-collapse:collapse; font-size:0.875rem; margin-bottom:1rem;">
+    <thead>
+      <tr style="border-bottom:1px solid var(--line);">
+        <th style="text-align:left; padding:0.35rem 0.5rem;">Pattern</th>
+        <th style="text-align:left; padding:0.35rem 0.5rem;">Description</th>
+        <th style="text-align:right; padding:0.35rem 0.5rem;">Matches</th>
+        <th style="text-align:center; padding:0.35rem 0.5rem;">Active</th>
+        <th style="padding:0.35rem 0.5rem;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bp in boilerplate_patterns %}
+      <tr style="border-bottom:1px solid var(--line); {% if not bp.active %}opacity:0.45;{% endif %}">
+        <td style="padding:0.35rem 0.5rem; font-family:monospace; word-break:break-all; max-width:28rem;">
+          {{ bp.pattern }}
+          {% if bp.example %}
+          <div style="font-family:inherit; font-size:0.78rem; color:var(--muted); margin-top:0.15rem;">e.g. {{ bp.example[:120] }}{% if bp.example|length > 120 %}…{% endif %}</div>
+          {% endif %}
+        </td>
+        <td style="padding:0.35rem 0.5rem; color:var(--muted);">{{ bp.description or "—" }}</td>
+        <td style="padding:0.35rem 0.5rem; text-align:right; color:var(--muted);">{{ bp.match_count if bp.match_count is not none else "—" }}</td>
+        <td style="padding:0.35rem 0.5rem; text-align:center;">
+          <span class="badge-sm {% if bp.active %}badge-green{% else %}badge-gray{% endif %}">
+            {{ "on" if bp.active else "off" }}
+          </span>
+        </td>
+        <td style="padding:0.35rem 0.5rem; white-space:nowrap; text-align:right;">
+          <form method="post" action="/ui/boilerplate/{{ bp.id }}/toggle" style="display:inline;">
+            <button type="submit" class="secondary" style="padding:0.2rem 0.5rem; font-size:0.8rem;">
+              {{ "Disable" if bp.active else "Enable" }}
+            </button>
+          </form>
+          <form method="post" action="/ui/boilerplate/{{ bp.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this pattern?')">
+            <button type="submit" class="danger" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0 0 0.8rem;">No patterns yet. Run the analysis script or add one manually.</p>
+  {% endif %}
+
+  <form method="post" action="/ui/boilerplate/add" style="margin-top:0.5rem;">
+    <p style="margin:0 0 0.5rem; font-weight:600; font-size:0.9rem;">Add pattern manually</p>
+    <div class="filter-grid" style="margin-bottom:0.5rem;">
+      <label class="form-label" style="grid-column:1/-1;">
+        <span>Regex pattern <small class="muted">(case-insensitive, matched against individual sentences)</small></span>
+        <input type="text" name="pattern" placeholder="\balle\s+Geschäfte\s+tätigen\b.*?\bgeeignet\s+sind\b" style="font-family:monospace;">
+      </label>
+      <label class="form-label">
+        <span>Description <small class="muted">(optional)</small></span>
+        <input type="text" name="description" placeholder="e.g. All suitable transactions clause">
+      </label>
+      <label class="form-label">
+        <span>Example sentence <small class="muted">(optional)</small></span>
+        <input type="text" name="example" placeholder="Die Gesellschaft kann alle Geschäfte tätigen…">
+      </label>
+    </div>
+    <button type="submit" class="secondary">Add pattern</button>
+  </form>
+</section>
 {% endblock %}

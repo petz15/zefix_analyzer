@@ -790,6 +790,7 @@ def ui_settings(
             "anthropic_api_key": current.get("anthropic_api_key", ""),
             "claude_target_description": current.get("claude_target_description", ""),
             "claude_classify_prompt": current.get("claude_classify_prompt", ""),
+            "boilerplate_patterns": crud.list_boilerplate_patterns(db),
             "message": message,
             "error": error,
             "active_task": active_task,
@@ -1031,6 +1032,53 @@ def start_claude_classify(
     if err:
         return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Claude classification queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+# ── Boilerplate pattern management ────────────────────────────────────────────
+
+@router.post("/ui/boilerplate/add", include_in_schema=False)
+def boilerplate_add(
+    request: Request,
+    pattern: str = Form(""),
+    description: str = Form(""),
+    example: str = Form(""),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    import re as _re
+    pattern = pattern.strip()
+    if not pattern:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error="Pattern cannot be empty"), status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        _re.compile(pattern, _re.IGNORECASE)
+    except _re.error as exc:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=f"Invalid regex: {exc}"), status_code=status.HTTP_303_SEE_OTHER)
+    crud.create_boilerplate_pattern(
+        db,
+        pattern=pattern,
+        description=description.strip() or None,
+        example=example.strip() or None,
+        active=True,
+    )
+    return RedirectResponse(url=_url_for(request, "ui_settings", message="Boilerplate pattern added"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/boilerplate/{pattern_id}/toggle", include_in_schema=False)
+def boilerplate_toggle(request: Request, pattern_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    row = crud.get_boilerplate_pattern(db, pattern_id)
+    if not row:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error="Pattern not found"), status_code=status.HTTP_303_SEE_OTHER)
+    crud.update_boilerplate_pattern(db, row, active=not row.active)
+    state = "enabled" if row.active else "disabled"
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Pattern {state}"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/boilerplate/{pattern_id}/delete", include_in_schema=False)
+def boilerplate_delete(request: Request, pattern_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    row = crud.get_boilerplate_pattern(db, pattern_id)
+    if not row:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error="Pattern not found"), status_code=status.HTTP_303_SEE_OTHER)
+    crud.delete_boilerplate_pattern(db, row)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message="Pattern deleted"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ── Collection ────────────────────────────────────────────────────────────────

@@ -258,6 +258,32 @@ Use this template per task:
   - unauthenticated request to protected endpoint returns 401/redirect
   - authenticated request succeeds
 
+## Feature Improvements Implemented (current monolith)
+
+These features were added to the internal monolith prior to the SaaS migration and
+should be preserved/ported during tenant scoping.
+
+### Claude classification cost optimisation
+- Prompt caching: system prompt sent with `cache_control: ephemeral` — cached reads cost ~10% of normal input price.
+- Multi-company messages: N companies packed into one API call with JSON-array response (`companies_per_message`, default 10).
+- Anthropic Message Batches API path: all requests submitted in one batch call, 50% discount, polled until done.
+- Sort order: companies processed in descending `zefix_score` + ascending distance-to-origin so the highest-value companies are classified first when a limit is applied.
+- Combined saving: ~10–15× cheaper per 1k companies vs original per-request approach.
+
+### Purpose boilerplate stripping
+- `boilerplate_patterns` DB table stores regex patterns (with description, example, match count, active flag).
+- `strip_purpose_boilerplate(text, patterns)` splits purpose text into sentences and drops any matching a stored regex before the text is sent to Claude — reduces input tokens for boilerplate-heavy registrations.
+- Analysis script: `scripts/analyze_boilerplate.py` — counts sentence frequency across all purpose texts, prints top candidates, and supports `--insert` for interactive review and DB insertion. Accepts `--db-url` to run outside the container.
+- Patterns managed via Settings UI (list, add, toggle active, delete) without code changes.
+
+### Google scoring improvements
+- Address/ZIP/street matching added to location scoring (max +45 pts from municipality + canton + ZIP + street).
+- Directory domains (moneyhouse, local.ch, etc.) hard-return score 0 instead of applying a penalty.
+- `social_media_only` flag set when the best Google result is a social media domain; passed to Claude context.
+
+### Negative scoring
+- `scoring_exclude_clusters` and `scoring_exclude_keywords` settings with configurable point deductions.
+
 ## Decision Log
 - choose modular monolith first to reduce migration risk
 - choose single database tenant scoping before sharding
