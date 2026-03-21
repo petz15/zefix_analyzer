@@ -199,6 +199,12 @@
       </label>
 
       <label class="form-label">
+        <span>Claude: Max purpose chars</span>
+        <input type="number" name="scoring_claude_max_purpose_chars" value="{{ scoring_claude_max_purpose_chars }}" min="0" max="10000" step="100">
+        <small class="muted">Truncate purpose text to this many characters before sending to Claude. 0 = no limit. Default: 800.</small>
+      </label>
+
+      <label class="form-label">
         <span>Anthropic API key</span>
         <input type="password" name="anthropic_api_key" value="{{ anthropic_api_key }}" placeholder="sk-ant-…" autocomplete="off">
         <small class="muted">Required for Claude classification jobs. Also readable from the <code>ANTHROPIC_API_KEY</code> environment variable.</small>
@@ -221,6 +227,15 @@
           Each company is sent as: <code>Company / Purpose / Industry / Keywords / Clusters</code>.</p>
         <textarea name="claude_classify_prompt" rows="7" style="width:100%; font-family: monospace; font-size: 0.85rem;"
                   placeholder="You are evaluating Swiss company entries as B2B leads…">{{ claude_classify_prompt }}</textarea>
+      </div>
+    </details>
+
+    <details style="margin-bottom: 0.8rem;">
+      <summary class="section-toggle">Claude category taxonomy (optional — injected when "Use fixed categories" is checked)</summary>
+      <div style="margin-top: 0.7rem;">
+        <p class="muted-hint">One category per line. Injected into the prompt as an allowed list when "Use fixed categories" is checked during a classify run. Leave empty to use a free-form category output.</p>
+        <textarea name="claude_classify_categories" rows="20" style="width:100%; font-family: monospace; font-size: 0.82rem;"
+                  placeholder="Gastronomy&#10;Software Development&#10;…">{{ claude_classify_categories }}</textarea>
       </div>
     </details>
 
@@ -384,9 +399,17 @@
       <input type="checkbox" name="rerun_classified" value="true">
       <span>Rerun already classified <small class="muted">(include companies that already have a Claude score)</small></span>
     </label>
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
       <input type="checkbox" name="use_batch_api" value="true">
       <span>Use Batch API <small class="muted">(~50% cheaper — submits all at once, polls until done)</small></span>
+    </label>
+    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+      <input type="checkbox" name="auto_filter_keywords" value="true">
+      <span>Auto-filter by target keywords <small class="muted">(only classify companies whose purpose keywords contain any of the scoring target keywords)</small></span>
+    </label>
+    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+      <input type="checkbox" name="use_fixed_categories" value="true">
+      <span>Use fixed category list <small class="muted">(inject the category taxonomy from settings into the prompt — more consistent output)</small></span>
     </label>
     <button type="submit">Run Claude classification</button>
   </form>

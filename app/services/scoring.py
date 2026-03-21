@@ -36,14 +36,23 @@ _DIRECTORY_DOMAINS = {
     "swiss-arc.ch",
     "kompass.com",
     "northdata.com",
+    "northdata.de",
+    "northdata.eu",
+    "northdata.ch",
     "provenexpert.com",
     "bestatter1.ch",
+    "die-bestatter.ch",
     "auditorstats.ch",
     "maptons.com",
     "pappers.ch",
     "kanzleiwelten.com",
-    
-
+    "yellowpages.swiss",
+    "yellowpages.ch",
+    "yellowpages.com",
+    "lixt.com",
+    "swissbiotech.org",
+    "ofri.ch",
+    "region-emmental.ch",
 }
 
 _NEWS_DOMAINS = {
@@ -188,7 +197,7 @@ def score_result(
       - Legal form in domain/title:   +5 pts  bonus
       - Swiss TLD (.ch / .swiss):    +10 pts  bonus
       - Social media domain:         -30 pts  penalty
-      - Local directory URL path:   -25 pts  penalty (verzeichnis in URL)
+      - Local directory URL path:   hard  0  (verzeichnis in URL path)
       - Directory domain:           hard  0  (returned immediately)
     """
     title = result.get("title", "") or ""
@@ -198,6 +207,10 @@ def score_result(
     # --- Directory / news domain → always 0, no further scoring ---
     domain = _root_domain(link)
     if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
+        return 0
+
+    # --- Local directory URL path → always 0 (e.g. /unternehmensverzeichnis/) ---
+    if _LOCAL_DIRECTORY_PATH_RE.search(link):
         return 0
 
     combined_lower = f"{title} {snippet}".lower()
@@ -247,10 +260,6 @@ def score_result(
     # --- Social media penalty (-30) ---
     if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):
         score -= 30
-
-    # --- Local directory path penalty (-25) ---
-    if _LOCAL_DIRECTORY_PATH_RE.search(link):
-        score -= 25
 
     return max(0, min(100, score))
 
@@ -494,6 +503,8 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     # Data quality penalties
     "scoring_no_keywords_penalty": "10",       # deducted when purpose_keywords is empty
     "scoring_undefined_cluster_penalty": "10", # deducted when tfidf_cluster is undefined/missing
+    # Claude input token optimisation
+    "scoring_claude_max_purpose_chars": "800", # purpose text truncated to this many chars before sending to Claude
 }
 
 _CANCELLED_STATUS_TERMS = frozenset({"being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"})

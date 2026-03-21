@@ -1317,6 +1317,8 @@ def claude_classify_batch(
     min_google_score: int | None = None,
     purpose_keywords: str | None = None,
     rerun_classified: bool = False,
+    auto_filter_keywords: bool = False,
+    use_fixed_categories: bool = False,
     limit: int = 500,
     system_prompt: str | None = None,
     target_description: str | None = None,
@@ -1376,6 +1378,18 @@ def claude_classify_batch(
     scoring_config = _load_scoring_config(db)
     origin_lat = float(scoring_config.get("scoring_origin_lat", 46.9266))
     origin_lon = float(scoring_config.get("scoring_origin_lon", 7.4817))
+    max_purpose_chars = int(scoring_config.get("scoring_claude_max_purpose_chars") or 800)
+
+    # Fixed category taxonomy — append allowed list to prompt so output tokens stay short
+    if use_fixed_categories:
+        raw_cats = (crud.get_setting(db, "claude_classify_categories", "") or "").strip()
+        if raw_cats:
+            cat_list = [c.strip() for c in raw_cats.replace("\n", ",").split(",") if c.strip()]
+            if cat_list:
+                cat_str = ", ".join(cat_list)
+                prompt = prompt + f'\n\nUse ONLY one of these categories (exact match): {cat_str}'
+                # Rebuild system param with updated prompt
+                system_param = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
 
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if not rerun_classified:
@@ -1390,6 +1404,16 @@ def claude_classify_batch(
         query = query.filter(Company.website_match_score >= min_google_score)
     if purpose_keywords:
         query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
+    # Auto-filter: only classify companies matching the configured scoring target keywords
+    if auto_filter_keywords:
+        raw_target = (scoring_config.get("scoring_target_keywords") or "").strip()
+        if raw_target:
+            kw_terms = [t.strip() for t in raw_target.split(",") if t.strip()]
+            if kw_terms:
+                from sqlalchemy import or_
+                query = query.filter(or_(
+                    Company.purpose_keywords.ilike(f"%{kw}%") for kw in kw_terms
+                ))
 
     all_candidates = query.all()
     all_candidates.sort(key=lambda c: (
@@ -1409,6 +1433,8 @@ def claude_classify_batch(
 
     def _build_user_text(company: Company) -> str:
         purpose = strip_purpose_boilerplate(company.purpose or "", _boilerplate_patterns)
+        if max_purpose_chars > 0 and len(purpose) > max_purpose_chars:
+            purpose = purpose[:max_purpose_chars] + "…"
         parts = [f"Company: {company.name}", f"Purpose: {purpose}"]
         if company.purpose_keywords:
             parts.append(f"Keywords: {company.purpose_keywords}")

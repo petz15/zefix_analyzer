@@ -41,6 +41,142 @@ templates.env.filters["tojson_parse"] = lambda s: json.loads(s) if s else {}
 PAGE_SIZE = 50
 MAP_DATA_MAX_POINTS = 20000
 
+_DEFAULT_CLAUDE_CATEGORIES = (
+    "Accommodation & Hotels\n"
+    "Accounting & Tax Advisory\n"
+    "Advertising & Marketing Agency\n"
+    "Agriculture & Farming\n"
+    "Architecture & Urban Planning\n"
+    "Art & Creative Studios\n"
+    "Automotive Sales & Repair\n"
+    "Bakery & Confectionery\n"
+    "Beauty & Cosmetics\n"
+    "Biotechnology\n"
+    "Bookkeeping & Payroll Services\n"
+    "Building Materials & Supply\n"
+    "Business Consulting\n"
+    "Catering & Event Catering\n"
+    "Chemical Manufacturing\n"
+    "Civil Engineering\n"
+    "Cleaning & Facility Services\n"
+    "Clothing & Fashion Retail\n"
+    "Construction & General Contracting\n"
+    "Courier & Delivery Services\n"
+    "Craft & Artisan Production\n"
+    "Data Analytics & Business Intelligence\n"
+    "Dental Practice\n"
+    "Design & Graphic Design\n"
+    "E-Commerce & Online Retail\n"
+    "Education & Training\n"
+    "Electrical Engineering & Installation\n"
+    "Electronic Components & Manufacturing\n"
+    "Energy & Utilities\n"
+    "Environmental Services\n"
+    "Event Management & Organisation\n"
+    "Export & International Trade\n"
+    "Financial Advisory & Wealth Management\n"
+    "Financial Services & Banking\n"
+    "Fire & Safety Services\n"
+    "Fitness & Sports\n"
+    "Food & Beverage Manufacturing\n"
+    "Food Import & Distribution\n"
+    "Forestry & Wood Processing\n"
+    "Freight & Logistics\n"
+    "Funeral Services\n"
+    "Furniture & Interior Design\n"
+    "Garden & Landscape Services\n"
+    "Gastronomy & Restaurants\n"
+    "General Retail\n"
+    "Geology & Surveying\n"
+    "Graphic & Print Services\n"
+    "Hardware & Tools Retail\n"
+    "Healthcare & Medical Services\n"
+    "Heating, Ventilation & Air Conditioning\n"
+    "Holding Company\n"
+    "Home Services & Repairs\n"
+    "Hospitality & Food Service\n"
+    "Human Resources & Recruitment\n"
+    "HVAC & Plumbing\n"
+    "Import & Wholesale Trade\n"
+    "Industrial Automation\n"
+    "Industrial Equipment & Machinery\n"
+    "Information Technology Services\n"
+    "Insurance\n"
+    "Interior Architecture\n"
+    "Investment & Asset Management\n"
+    "Jewellery & Watches\n"
+    "Journalism & Media\n"
+    "Language & Translation Services\n"
+    "Law & Legal Services\n"
+    "Lighting & Electrical Products\n"
+    "Logistics & Supply Chain\n"
+    "Machine Building & Mechanical Engineering\n"
+    "Management Consulting\n"
+    "Manufacturing – Other\n"
+    "Marine & Water Transport\n"
+    "Measurement & Testing Equipment\n"
+    "Medical Devices & Equipment\n"
+    "Mental Health & Therapy\n"
+    "Metal Processing & Metalwork\n"
+    "Mobile & Telecom Services\n"
+    "Music & Entertainment\n"
+    "Non-Profit & Association\n"
+    "Notary & Civil Law Services\n"
+    "Nursing & Care Services\n"
+    "Office & Business Equipment\n"
+    "Optical & Precision Instruments\n"
+    "Packaging & Labelling\n"
+    "Painting & Surface Treatment\n"
+    "Pest Control\n"
+    "Pet Care & Veterinary Services\n"
+    "Pharmaceutical & Drugs\n"
+    "Photography & Videography\n"
+    "Physical Therapy & Rehabilitation\n"
+    "Plant & Equipment Rental\n"
+    "Plastics & Rubber Manufacturing\n"
+    "Printing & Publishing\n"
+    "Process Engineering\n"
+    "Project Management\n"
+    "Property Management\n"
+    "Public Relations\n"
+    "Real Estate – Development\n"
+    "Real Estate – Sales & Brokerage\n"
+    "Recycling & Waste Management\n"
+    "Research & Development\n"
+    "Restaurant Equipment & Supplies\n"
+    "Road Transport & Haulage\n"
+    "Roofing & Waterproofing\n"
+    "Safety & Security Services\n"
+    "Scaffolding & Access Systems\n"
+    "Security Technology\n"
+    "Social & Community Services\n"
+    "Software Development\n"
+    "Solar & Renewable Energy\n"
+    "Spa & Wellness\n"
+    "Sports & Recreation\n"
+    "Stone & Tile Work\n"
+    "Storage & Warehousing\n"
+    "Structural Engineering\n"
+    "Sustainability & ESG Consulting\n"
+    "Telecommunications Equipment\n"
+    "Textile & Apparel Manufacturing\n"
+    "Tourism & Travel Services\n"
+    "Trade & Commerce – General\n"
+    "Training & Coaching\n"
+    "Translation & Interpreting\n"
+    "Transport & Moving Services\n"
+    "Trust & Fiduciary Services\n"
+    "Vehicle Fleet Management\n"
+    "Veterinary Practice\n"
+    "Video & Film Production\n"
+    "Web Development & Digital Agency\n"
+    "Wholesale – Food & Grocery\n"
+    "Wholesale – Industrial Goods\n"
+    "Window & Door Manufacturing\n"
+    "Wood & Joinery Work\n"
+    "Other"
+)
+
 
 class JobCancelledError(Exception):
     """Raised when a running job receives a cancellation request."""
@@ -780,6 +916,8 @@ def ui_settings(
             "anthropic_api_key": current.get("anthropic_api_key", ""),
             "claude_target_description": current.get("claude_target_description", ""),
             "claude_classify_prompt": current.get("claude_classify_prompt", ""),
+            "claude_classify_categories": current.get("claude_classify_categories", "") or _DEFAULT_CLAUDE_CATEGORIES,
+            "scoring_claude_max_purpose_chars": current.get("scoring_claude_max_purpose_chars", "800"),
             "boilerplate_patterns": crud.list_boilerplate_patterns(db),
             "message": message,
             "error": error,
@@ -816,6 +954,8 @@ def save_settings(
     anthropic_api_key: str = Form(""),
     claude_target_description: str = Form(""),
     claude_classify_prompt: str = Form(""),
+    scoring_claude_max_purpose_chars: str = Form("800"),
+    claude_classify_categories: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     crud.set_setting(db, "google_search_enabled", "true" if google_search_enabled == "true" else "false")
@@ -861,6 +1001,11 @@ def save_settings(
     crud.set_setting(db, "anthropic_api_key", anthropic_api_key.strip())
     crud.set_setting(db, "claude_target_description", claude_target_description.strip())
     crud.set_setting(db, "claude_classify_prompt", claude_classify_prompt.strip())
+    crud.set_setting(db, "claude_classify_categories", claude_classify_categories.strip())
+    try:
+        crud.set_setting(db, "scoring_claude_max_purpose_chars", str(int(scoring_claude_max_purpose_chars.strip())))
+    except (ValueError, AttributeError):
+        crud.set_setting(db, "scoring_claude_max_purpose_chars", "800")
 
     return RedirectResponse(
         url=_url_for(request, "ui_settings", message="Settings saved"),
@@ -998,6 +1143,8 @@ def start_claude_classify(
     min_google_score: str = Form(""),
     purpose_keywords: str = Form(""),
     rerun_classified: str = Form("false"),
+    auto_filter_keywords: str = Form("false"),
+    use_fixed_categories: str = Form("false"),
     limit: str = Form("500"),
     system_prompt: str = Form(""),
     use_batch_api: str = Form("false"),
@@ -1019,6 +1166,10 @@ def start_claude_classify(
         params["purpose_keywords"] = purpose_keywords.strip()
     if rerun_classified == "true":
         params["rerun_classified"] = True
+    if auto_filter_keywords == "true":
+        params["auto_filter_keywords"] = True
+    if use_fixed_categories == "true":
+        params["use_fixed_categories"] = True
     if system_prompt.strip():
         params["system_prompt"] = system_prompt.strip()
     if use_batch_api == "true":
@@ -1359,6 +1510,8 @@ def _run_job(app, job_id: int) -> None:
                     min_google_score=params.get("min_google_score"),
                     purpose_keywords=params.get("purpose_keywords") or None,
                     rerun_classified=bool(params.get("rerun_classified", False)),
+                    auto_filter_keywords=bool(params.get("auto_filter_keywords", False)),
+                    use_fixed_categories=bool(params.get("use_fixed_categories", False)),
                     limit=int(params.get("limit", 500)),
                     system_prompt=params.get("system_prompt") or None,
                     target_description=crud.get_setting(db, "claude_target_description", "") or None,
