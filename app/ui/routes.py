@@ -473,15 +473,6 @@ def ui_company_detail(
         except Exception:  # noqa: BLE001
             pass
 
-    zefix_score_breakdown: dict | None = None
-    if company.zefix_score_breakdown:
-        try:
-            parsed = json.loads(company.zefix_score_breakdown)
-            if isinstance(parsed, dict):
-                zefix_score_breakdown = parsed
-        except Exception:  # noqa: BLE001
-            pass
-
     audit_log = crud.list_audit_for_company(db, company_id, limit=30)
 
     return templates.TemplateResponse(
@@ -494,7 +485,6 @@ def ui_company_detail(
             "google_results": google_results,
             "old_names": old_names,
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
-            "zefix_score_breakdown": zefix_score_breakdown,
             "audit_log": audit_log,
             "back_url": back or "/ui",
             "message": message,

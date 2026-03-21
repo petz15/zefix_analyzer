@@ -28,7 +28,9 @@ class Company(Base):
     # True if Google only returned social media results (no real website found)
     social_media_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Manual workflow statuses
-    # 'pending' | 'confirmed' | 'interesting' | 'rejected'
+    # None='pending' | 'interesting' | 'rejected'
+    # | 'potential_proposal' | 'confirmed_proposal'
+    # | 'potential_generic' | 'confirmed_generic'
     review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 'not_sent' | 'sent' | 'responded' | 'converted' | 'rejected'
     proposal_status: Mapped[str | None] = mapped_column(String(32), nullable=True)

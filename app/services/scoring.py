@@ -45,6 +45,9 @@ _SOCIAL_LEAD_DOMAINS = {
     "tiktok.com",
 }
 
+# Legal form words excluded when matching company name against domain
+_LEGAL_FORM_WORDS = {"ag", "gmbh", "sa", "sarl", "sàrl", "kg", "og", "llc", "ltd", "inc", "co", "spa"}
+
 # Words to exclude when extracting keywords from the purpose field
 _STOPWORDS = {
     "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
@@ -62,6 +65,22 @@ def _word_overlap_ratio(a: str, b: str) -> float:
     if not words_a:
         return 0.0
     return len(words_a & words_b) / len(words_a)
+
+
+def _domain_name_overlap(domain: str, company_name: str) -> float:
+    """Fraction of meaningful company name words found in the domain string.
+
+    Strips legal form suffixes (AG, GmbH, …) and short tokens before comparing,
+    so "Muster AG" vs "muster-ag.ch" → 1.0.
+    """
+    domain_tokens = set(re.findall(r"[a-zA-Z]{3,}", domain.lower()))
+    name_words = {
+        w for w in re.findall(r"\w+", company_name.lower())
+        if len(w) >= 3 and w not in _LEGAL_FORM_WORDS
+    }
+    if not name_words:
+        return 0.0
+    return len(name_words & domain_tokens) / len(name_words)
 
 
 def _root_domain(url: str) -> str:
@@ -121,13 +140,15 @@ def score_result(
     Returns an integer 0-100.
 
     Breakdown:
-      - Name match in title:        0-40 pts  (word overlap × 40)
-      - Name match in snippet:      0-10 pts  (bonus if overlap > 0.5)
-      - Location in combined text:  0-45 pts  (municipality 20 + canton 10
-                                               + zip 10 + street 5)
-      - Purpose keyword match:      0-10 pts  (1+ hit = 5, 3+ hits = 10)
+      - Name match in title:        0-30 pts  (word overlap × 30)
+      - Name match in snippet:      0-20 pts  (word overlap × 20)
+      - Domain name matches company: 0-15 pts  (overlap of company words in domain)
+      - Location in combined text:  0-65 pts  (municipality 25 + canton 10
+                                               + zip 15 + street 15)
+      - Purpose keywords in snippet: 0-15 pts  (1-2 hits = 8, 3+ hits = 15)
       - Legal form in domain/title:   +5 pts  bonus
-      - Directory domain:            -20 pts  penalty
+      - Social media domain:         -30 pts  penalty
+      - Directory domain:           hard  0  (returned immediately)
     """
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
@@ -138,50 +159,49 @@ def score_result(
     if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
         return 0
 
-    combined = f"{title} {snippet}"
-    combined_lower = combined.lower()
+    combined_lower = f"{title} {snippet}".lower()
+    snippet_lower = snippet.lower()
 
-    # --- Name in title (0-40) ---
-    score = int(_word_overlap_ratio(company_name, title) * 40)
+    # --- Name in title (0-30) ---
+    score = int(_word_overlap_ratio(company_name, title) * 30)
 
-    # --- Name in snippet bonus (0-10) ---
-    if _word_overlap_ratio(company_name, snippet) > 0.5:
-        score += 10
+    # --- Name in snippet (0-20) ---
+    score += int(_word_overlap_ratio(company_name, snippet) * 20)
 
-    # --- Location match (0-45) ---
+    # --- Domain name matches company name (0-15) ---
+    score += int(_domain_name_overlap(domain, company_name) * 15)
+
+    # --- Location match (0-65) ---
     if municipality and municipality.lower() in combined_lower:
-        score += 20
-    if canton and canton.upper() in combined.upper():
+        score += 25
+    if canton and canton.upper() in f"{title} {snippet}".upper():
         score += 10
     if address:
         zip_code, street_name = _extract_address_parts(address)
-        if zip_code and zip_code in combined:
-            score += 10
+        if zip_code and zip_code in f"{title} {snippet}":
+            score += 15
         if street_name and street_name in combined_lower:
-            score += 5
+            score += 15
 
-    # --- Purpose keyword match (0-10) ---
+    # --- Purpose keywords in snippet (0-15) ---
     keywords = _purpose_keywords(purpose)
     if keywords:
-        hits = sum(1 for kw in keywords if kw in combined_lower)
+        hits = sum(1 for kw in keywords if kw in snippet_lower)
         if hits >= 3:
-            score += 10
+            score += 15
         elif hits >= 1:
-            score += 5
+            score += 8
 
     # --- Legal form presence in domain or title (+5 bonus) ---
     if legal_form:
-        domain = _root_domain(link)
         lf_lower = legal_form.lower()
-        # Common abbreviations: ag, gmbh, sa, sarl, kg, oG, etc.
         abbrevs = re.findall(r"\b\w{2,6}\b", lf_lower)
         if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
             score += 5
 
-    # --- Directory domain penalty ---
-    domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
-        score -= 20
+    # --- Social media penalty (-30) ---
+    if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):
+        score -= 30
 
     return max(0, min(100, score))
 
@@ -231,15 +251,15 @@ def fallback_result_score(
     score = 5
 
     if municipality and municipality.lower() in combined_lower:
-        score += 20
+        score += 25
     if canton and canton.upper() in combined.upper():
         score += 10
     if address:
         zip_code, street_name = _extract_address_parts(address)
         if zip_code and zip_code in combined:
-            score += 10
+            score += 15
         if street_name and street_name in combined_lower:
-            score += 5
+            score += 15
 
     if legal_form:
         domain = _root_domain(link)

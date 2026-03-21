@@ -40,10 +40,13 @@
           <span>Review status</span>
           <select name="review_status" style="padding:0.3rem 0.5rem;">
             <option value="">All</option>
-            <option value="confirmed"   {% if f_review_status == 'confirmed'   %}selected{% endif %}>Confirmed</option>
-            <option value="interesting" {% if f_review_status == 'interesting' %}selected{% endif %}>Interesting</option>
-            <option value="rejected"    {% if f_review_status == 'rejected'    %}selected{% endif %}>Rejected</option>
-            <option value="_none"       {% if f_review_status == '_none'       %}selected{% endif %}>No status</option>
+            <option value="potential_proposal"  {% if f_review_status == 'potential_proposal'  %}selected{% endif %}>Potential proposal</option>
+            <option value="confirmed_proposal"  {% if f_review_status == 'confirmed_proposal'  %}selected{% endif %}>Confirmed proposal</option>
+            <option value="potential_generic"   {% if f_review_status == 'potential_generic'   %}selected{% endif %}>Potential generic</option>
+            <option value="confirmed_generic"   {% if f_review_status == 'confirmed_generic'   %}selected{% endif %}>Confirmed generic</option>
+            <option value="interesting"         {% if f_review_status == 'interesting'         %}selected{% endif %}>Interesting</option>
+            <option value="rejected"            {% if f_review_status == 'rejected'            %}selected{% endif %}>Rejected</option>
+            <option value="_none"               {% if f_review_status == '_none'               %}selected{% endif %}>No status</option>
           </select>
         </label>
 

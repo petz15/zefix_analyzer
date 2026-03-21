@@ -61,12 +61,24 @@
   </div>
   {% endif %}
   <div class="stat-divider"></div>
-  <a class="stat-item stat-item--link" href="/ui?review_status=confirmed">
-    <span class="stat-value text-green">{{ stats.review.confirmed }}</span>
-    <span class="stat-label">Confirmed</span>
+  <a class="stat-item stat-item--link" href="/ui?review_status=confirmed_proposal">
+    <span class="stat-value text-green">{{ stats.review.confirmed_proposal }}</span>
+    <span class="stat-label">Confirmed proposal</span>
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=potential_proposal">
+    <span class="stat-value text-blue">{{ stats.review.potential_proposal }}</span>
+    <span class="stat-label">Potential proposal</span>
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=confirmed_generic">
+    <span class="stat-value text-green">{{ stats.review.confirmed_generic }}</span>
+    <span class="stat-label">Confirmed generic</span>
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=potential_generic">
+    <span class="stat-value text-blue">{{ stats.review.potential_generic }}</span>
+    <span class="stat-label">Potential generic</span>
   </a>
   <a class="stat-item stat-item--link" href="/ui?review_status=interesting">
-    <span class="stat-value text-blue">{{ stats.review.interesting }}</span>
+    <span class="stat-value text-yellow">{{ stats.review.interesting }}</span>
     <span class="stat-label">Interesting</span>
   </a>
   <a class="stat-item stat-item--link" href="/ui?review_status=_none">
@@ -123,10 +135,13 @@
         <span>Review status</span>
         <select name="review_status">
           <option value="">All</option>
-          <option value="_none"       {% if f_review_status == '_none'       %}selected{% endif %}>Pending (none set)</option>
-          <option value="confirmed"   {% if f_review_status == 'confirmed'   %}selected{% endif %}>Confirmed</option>
-          <option value="interesting" {% if f_review_status == 'interesting' %}selected{% endif %}>Interesting</option>
-          <option value="rejected"    {% if f_review_status == 'rejected'    %}selected{% endif %}>Rejected</option>
+          <option value="_none"                {% if f_review_status == '_none'                %}selected{% endif %}>Pending (none set)</option>
+          <option value="potential_proposal"  {% if f_review_status == 'potential_proposal'  %}selected{% endif %}>Potential proposal</option>
+          <option value="confirmed_proposal"  {% if f_review_status == 'confirmed_proposal'  %}selected{% endif %}>Confirmed proposal</option>
+          <option value="potential_generic"   {% if f_review_status == 'potential_generic'   %}selected{% endif %}>Potential generic</option>
+          <option value="confirmed_generic"   {% if f_review_status == 'confirmed_generic'   %}selected{% endif %}>Confirmed generic</option>
+          <option value="interesting"         {% if f_review_status == 'interesting'         %}selected{% endif %}>Interesting</option>
+          <option value="rejected"            {% if f_review_status == 'rejected'            %}selected{% endif %}>Rejected</option>
         </select>
       </label>
       <label class="form-label">
@@ -383,10 +398,13 @@
                     <select class="status-select" data-company-id="{{ c.id }}" data-field="review_status"
                       data-url="/ui/companies/{{ c.id }}/quick-status"
                       data-original="{{ c.review_status or '' }}">
-                <option value=""            {% if not c.review_status                     %}selected{% endif %}>pending</option>
-                <option value="confirmed"   {% if c.review_status == 'confirmed'           %}selected{% endif %}>confirmed</option>
-                <option value="interesting" {% if c.review_status == 'interesting'         %}selected{% endif %}>interesting</option>
-                <option value="rejected"    {% if c.review_status == 'rejected'            %}selected{% endif %}>rejected</option>
+                <option value=""                   {% if not c.review_status                          %}selected{% endif %}>pending</option>
+                <option value="potential_proposal" {% if c.review_status == 'potential_proposal' %}selected{% endif %}>potential proposal</option>
+                <option value="confirmed_proposal" {% if c.review_status == 'confirmed_proposal' %}selected{% endif %}>confirmed proposal</option>
+                <option value="potential_generic"  {% if c.review_status == 'potential_generic'  %}selected{% endif %}>potential generic</option>
+                <option value="confirmed_generic"  {% if c.review_status == 'confirmed_generic'  %}selected{% endif %}>confirmed generic</option>
+                <option value="interesting"        {% if c.review_status == 'interesting'        %}selected{% endif %}>interesting</option>
+                <option value="rejected"           {% if c.review_status == 'rejected'           %}selected{% endif %}>rejected</option>
               </select>
             </td>
             <td>

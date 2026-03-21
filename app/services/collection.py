@@ -677,7 +677,6 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
         if is_irrelevant_result(rr, company_name=company.name)
     )
     use_fallback = bool(top_window) and irrelevant_count >= ((len(top_window) + 1) // 2)
-    social_in_top = any(is_social_lead_domain((rr.get("link") or "")) for rr in top_window)
 
     scored: list[dict] = []
     for rr in raw_results:
@@ -704,9 +703,6 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
                 legal_form=company.legal_form,
                 address=company.address,
             )
-
-        if social_in_top and is_social_lead_domain(row["link"]):
-            s = min(100, s + 15)
 
         scored.append({**row, "score": s})
 

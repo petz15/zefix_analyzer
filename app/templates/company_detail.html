@@ -31,11 +31,14 @@
 
     {% if company.review_status %}
       <span class="badge
-        {% if company.review_status == 'confirmed' %}badge-green
-        {% elif company.review_status == 'interesting' %}badge-blue
+        {% if company.review_status == 'confirmed_proposal' %}badge-green
+        {% elif company.review_status == 'potential_proposal' %}badge-blue
+        {% elif company.review_status == 'confirmed_generic' %}badge-green
+        {% elif company.review_status == 'potential_generic' %}badge-blue
+        {% elif company.review_status == 'interesting' %}badge-yellow
         {% elif company.review_status == 'rejected' %}badge-red
         {% else %}badge-gray{% endif %}">
-        Review: {{ company.review_status }}
+        Review: {{ company.review_status | replace("_", " ") }}
       </span>
     {% else %}
       <span class="badge badge-gray">Review: pending</span>
@@ -105,29 +108,6 @@
     <dt>Updated</dt><dd>{{ company.updated_at.strftime('%Y-%m-%d') }}</dd>
   </dl>
 
-  {% if zefix_score_breakdown %}
-  <details style="margin-top:0.8rem;">
-    <summary class="section-toggle">Zefix Score Breakdown</summary>
-    <div class="table-wrap" style="margin-top:0.6rem;">
-      <table>
-        <thead>
-          <tr>
-            <th>Component</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for key, value in zefix_score_breakdown.items() %}
-          <tr>
-            <td>{{ key }}</td>
-            <td>{{ value }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-  {% endif %}
 </section>
 
 {# ── Edit company fields ──────────────────────────────────────────────────── #}
@@ -144,8 +124,8 @@
           <span>Review status</span>
           <select name="review_status">
             <option value="">— pending —</option>
-            {% for val in ['confirmed', 'interesting', 'rejected'] %}
-              <option value="{{ val }}" {% if company.review_status == val %}selected{% endif %}>{{ val }}</option>
+            {% for val, label in [('potential_proposal','potential proposal'),('confirmed_proposal','confirmed proposal'),('potential_generic','potential generic'),('confirmed_generic','confirmed generic'),('interesting','interesting'),('rejected','rejected')] %}
+              <option value="{{ val }}" {% if company.review_status == val %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </label>

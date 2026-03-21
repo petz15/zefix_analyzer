@@ -180,7 +180,7 @@ def get_company_stats(db: Session) -> dict:
     )
 
     review_counts: dict[str, int] = {}
-    for label in ("confirmed", "interesting", "rejected"):
+    for label in ("interesting", "rejected", "potential_proposal", "confirmed_proposal", "potential_generic", "confirmed_generic"):
         review_counts[label] = db.query(Company).filter(Company.review_status == label).count()
     review_counts["pending"] = db.query(Company).filter(Company.review_status.is_(None)).count()
 
