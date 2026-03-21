@@ -1251,18 +1251,23 @@ def run_batch_collect(
         "google_enriched": 0,
         "google_no_result": 0,
         "errors": [],
+        "warnings": [],
     }
 
     if run_google:
-        quota = settings.google_daily_quota
+        quota = int(crud.get_setting(db, "google_daily_quota", str(settings.google_daily_quota)))
         searches_today = crud.get_company_stats(db)["searches_today"]
         available = max(0, quota - searches_today)
         if available == 0:
-            stats["errors"].append(
-                f"Daily Google quota of {quota} already reached; skipping Google enrichment."
+            stats["warnings"].append(
+                f"Daily Google quota reached: {searches_today}/{quota} searches used today. "
+                f"Google enrichment skipped. Reset at midnight UTC or raise quota in settings."
             )
             run_google = False
         elif limit > available:
+            stats["warnings"].append(
+                f"Batch limited to {available} companies (quota: {searches_today}/{quota} searches used today)."
+            )
             limit = available
 
     query = db.query(Company)

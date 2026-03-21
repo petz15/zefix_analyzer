@@ -1372,6 +1372,8 @@ def _run_job(app, job_id: int) -> None:
                     f"Done — {stats['google_enriched']} enriched, "
                     f"{stats['google_no_result']} no result, {len(stats['errors'])} errors"
                 )
+                if stats.get("warnings"):
+                    done_msg += f", {len(stats['warnings'])} warning(s)"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
@@ -1529,6 +1531,10 @@ def _run_job(app, job_id: int) -> None:
 
             crud.mark_completed(db, job, message=done_msg, stats=stats)
             crud.create_event(db, job_id=job.id, level="info", message=done_msg)
+            for _w in (stats.get("warnings") or [])[:10]:
+                crud.create_event(db, job_id=job.id, level="warn", message=str(_w))
+            for _err in (stats.get("errors") or [])[:50]:
+                crud.create_event(db, job_id=job.id, level="warn", message=str(_err))
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
         except JobPausedError:
             current_stats = json.loads(job.stats_json) if job.stats_json else {}
@@ -1613,7 +1619,7 @@ def ui_jobs(
 ):
     _ensure_job_worker(request.app)
     jobs = crud.list_jobs(db, limit=100)
-    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=20) for j in jobs}
+    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=60, exclude_debug=True) for j in jobs}
     has_active = any(j.status in ("queued", "running", "paused") for j in jobs)
     return templates.TemplateResponse(
         "jobs.html",
@@ -1648,7 +1654,7 @@ def ui_jobs_stream(db: Session = Depends(get_db)):
 @router.get("/ui/jobs/partial", response_class=HTMLResponse, include_in_schema=False)
 def ui_jobs_partial(request: Request, db: Session = Depends(get_db)):
     jobs = crud.list_jobs(db, limit=100)
-    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=20) for j in jobs}
+    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=60, exclude_debug=True) for j in jobs}
     return templates.TemplateResponse(
         "jobs_table.html",
         {"request": request, "jobs": jobs, "events_by_job": events_by_job},

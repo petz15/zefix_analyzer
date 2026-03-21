@@ -109,14 +109,17 @@ def create_event(db: Session, *, job_id: int, level: str, message: str) -> JobRu
     return event
 
 
-def list_events(db: Session, *, job_id: int, limit: int = 50) -> list[JobRunEvent]:
-    return (
-        db.query(JobRunEvent)
-        .filter(JobRunEvent.job_id == job_id)
-        .order_by(JobRunEvent.created_at.desc(), JobRunEvent.id.desc())
-        .limit(limit)
-        .all()
-    )
+def list_events(
+    db: Session,
+    *,
+    job_id: int,
+    limit: int = 50,
+    exclude_debug: bool = False,
+) -> list[JobRunEvent]:
+    q = db.query(JobRunEvent).filter(JobRunEvent.job_id == job_id)
+    if exclude_debug:
+        q = q.filter(JobRunEvent.level != "debug")
+    return q.order_by(JobRunEvent.created_at.desc(), JobRunEvent.id.desc()).limit(limit).all()
 
 
 def update_progress(
