@@ -53,6 +53,7 @@ class CompanyBase(BaseModel):
     tfidf_cluster: str | None = None
     claude_score: int | None = None
     claude_category: str | None = None
+    claude_freeform: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -112,6 +113,7 @@ class CompanyUpdate(BaseModel):
     tfidf_cluster: str | None = None
     claude_score: int | None = None
     claude_category: str | None = None
+    claude_freeform: str | None = None
     claude_scored_at: datetime | None = None
     zefix_scored_at: datetime | None = None
 

@@ -80,7 +80,13 @@
       "Bash(python -c \"from alembic.config import Config; from alembic import command; cfg = Config\\(''alembic.ini''\\); command.upgrade\\(cfg, ''head''\\)\")",
       "Bash(where alembic:*)",
       "Bash(find c:/D/coding_projects/zefix_analyzer -name alembic* -not -path */__pycache__/*)",
-      "Bash(C:/Users/peter/anaconda3/Scripts/alembic.exe upgrade:*)"
+      "Bash(C:/Users/peter/anaconda3/Scripts/alembic.exe upgrade:*)",
+      "Bash(.venv/Scripts/alembic.exe upgrade:*)",
+      "Bash(cmd /c \".venv\\\\Scripts\\\\alembic.exe upgrade head\")",
+      "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe upgrade head\")",
+      "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe upgrade head 2>&1\")",
+      "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe current\")",
+      "Bash(powershell -Command \"cd ''c:\\\\D\\\\coding_projects\\\\zefix_analyzer''; .\\\\.venv\\\\Scripts\\\\alembic.exe upgrade head\")"
     ]
   }
 }

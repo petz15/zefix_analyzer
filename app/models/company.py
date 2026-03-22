@@ -72,9 +72,10 @@ class Company(Base):
     tfidf_cluster: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-company top TF-IDF keywords extracted from this company's own purpose text
     purpose_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Claude Haiku classification score and category
+    # Claude Haiku classification score, category, and optional free-form text
     claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claude_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
     claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     zefix_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference

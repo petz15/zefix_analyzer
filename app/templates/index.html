@@ -122,6 +122,11 @@
         <input type="text" name="tags" value="{{ f_tags }}" placeholder="e.g. saas, warm-lead…">
       </label>
       <label class="form-label">
+        <span>Claude Category</span>
+        <input type="text" name="claude_category" value="{{ f_claude_category }}"
+               placeholder="e.g. SaaS or _none" title="Filter by Claude-assigned category. Use _none to find companies without a category.">
+      </label>
+      <label class="form-label">
         <span>TF-IDF Cluster</span>
         <input type="text" name="tfidf_cluster" value="{{ f_tfidf_cluster }}"
                placeholder="keyword or _none / _any" title="Type a keyword to match cluster labels. Use _none to find unclassified, _any to find all with a cluster.">
@@ -214,10 +219,10 @@
 </section>
 
 {# ── Taxonomy overview ────────────────────────────────────────────────────── #}
-{% if taxonomy_stats.clusters or taxonomy_stats.keywords or taxonomy_stats.industries or taxonomy_stats.tags %}
+{% if taxonomy_stats.clusters or taxonomy_stats.keywords or taxonomy_stats.industries or taxonomy_stats.tags or taxonomy_stats.categories %}
 <section class="card">
   <details>
-    <summary class="section-toggle">Taxonomy Overview — Keywords / Clusters / Industries / Tags</summary>
+    <summary class="section-toggle">Taxonomy Overview — Keywords / Clusters / Categories / Tags</summary>
     <div class="taxonomy-grid" style="margin-top:0.8rem;">
 
       {% if taxonomy_stats.keywords %}
@@ -241,6 +246,20 @@
           {% for label, cnt in taxonomy_stats.clusters %}
           <li>
             <a class="cluster-tag" href="/ui?tfidf_cluster={{ label | urlencode }}">{{ label }}</a>
+            <span class="taxonomy-count">{{ cnt }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if taxonomy_stats.categories %}
+      <div class="taxonomy-col">
+        <div class="taxonomy-col-title">Claude Categories ({{ taxonomy_stats.categories | length }})</div>
+        <ul class="taxonomy-list">
+          {% for label, cnt in taxonomy_stats.categories %}
+          <li>
+            <a class="taxonomy-link" href="/ui?claude_category={{ label | urlencode }}">{{ label }}</a>
             <span class="taxonomy-count">{{ cnt }}</span>
           </li>
           {% endfor %}

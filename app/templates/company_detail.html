@@ -96,6 +96,9 @@
     {% if company.claude_score is not none %}
     <dt>Claude score</dt><dd>{{ company.claude_score }}{% if company.claude_category %} — <em>{{ company.claude_category }}</em>{% endif %}</dd>
     {% endif %}
+    {% if company.claude_freeform %}
+    <dt>Claude notes</dt><dd style="white-space:pre-wrap;">{{ company.claude_freeform }}</dd>
+    {% endif %}
     {% if company.combined_score is not none %}
     <dt>Combined score</dt><dd>{{ company.combined_score }}/100 <small class="muted">(avg of {% if company.zefix_score is not none %}zefix={{ company.zefix_score }}{% endif %}{% if company.claude_score is not none %} claude={{ company.claude_score }}{% endif %}{% if company.website_match_score is not none %} google={{ company.website_match_score }}{% endif %})</small></dd>
     {% endif %}

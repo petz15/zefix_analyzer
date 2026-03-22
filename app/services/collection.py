@@ -1506,7 +1506,8 @@ def claude_classify_batch(
     def _apply_single(company: Company, response_text: str) -> None:
         data = json.loads(_strip_fences(response_text))
         company.claude_score = max(0, min(100, int(data.get("score", 0))))
-        company.claude_category = str(data.get("category", ""))[:128]
+        company.claude_category = str(data.get("category", ""))[:128] if data.get("category") else None
+        company.claude_freeform = str(data["freeform"]) if data.get("freeform") else None
         company.claude_scored_at = datetime.now(tz=timezone.utc)
 
     def _apply_chunk(chunk: list[Company], response_text: str) -> None:
@@ -1516,7 +1517,8 @@ def claude_classify_batch(
         now = datetime.now(tz=timezone.utc)
         for company, item in zip(chunk, data):
             company.claude_score = max(0, min(100, int(item.get("score", 0))))
-            company.claude_category = str(item.get("category", ""))[:128]
+            company.claude_category = str(item.get("category", ""))[:128] if item.get("category") else None
+            company.claude_freeform = str(item["freeform"]) if item.get("freeform") else None
             company.claude_scored_at = now
 
     def _chunk_ids(chunk: list[Company]) -> str:

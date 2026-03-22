@@ -132,13 +132,17 @@
 {% endif %}
 
 {# ── Page heading ─────────────────────────────────────────────────────────── #}
-<div style="max-width:780px;">
 <h2 style="margin:0 0 1rem;">Settings</h2>
 
 {# ══════════════════════════════════════════════════════════════════════════ #}
 {# Main settings form — all fields POST together to /ui/settings              #}
 {# ══════════════════════════════════════════════════════════════════════════ #}
 <form method="post" action="/ui/settings">
+
+  <div class="save-bar" style="margin-bottom:1rem;">
+    <button type="submit">Save settings</button>
+    <a class="button-link secondary" href="/ui">Cancel</a>
+  </div>
 
   {# ── Google Search ──────────────────────────────────────────────────────── #}
   <details class="settings-section" open>
@@ -271,9 +275,9 @@
     </div>
   </details>
 
-  {# ── Claude Scoring ─────────────────────────────────────────────────────── #}
+  {# ── Claude API Options ──────────────────────────────────────────────────── #}
   <details class="settings-section">
-    <summary>Claude Scoring</summary>
+    <summary>Claude API Options</summary>
     <div class="settings-body">
       <p class="section-hint">Settings used when running Claude classification. Requires a valid Anthropic API key.</p>
       <div class="form-grid">
@@ -319,10 +323,6 @@
     </div>
   </details>
 
-  <div class="save-bar">
-    <button type="submit">Save settings</button>
-    <a class="button-link secondary" href="/ui">Cancel</a>
-  </div>
 
 </form>
 
@@ -364,8 +364,10 @@
   <div class="settings-body">
     <p class="muted" style="margin:0 0 0.75rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
-      <code>claude_category</code> per company. Requires an Anthropic API key (set in Claude Scoring above).
-      Per-request: ~$0.25 / 1k companies (1 company/msg). With 10 companies/msg + prompt caching: ~$0.03–0.05 / 1k. Batch API adds another ~50% discount.
+      <code>claude_category</code> per company. Requires an Anthropic API key (set in Claude API Options above).
+      Per-request: ~$0.37 / 1k companies (20 company/msg). With 20 companies/msg + prompt caching: ~$0.15 / 1k. Batch API adds another ~50% discount. 
+      Number of companies per msg has a large impact on costs. Bulk runs can take upto 24h. 
+      Using the fixed category list and auto-filtering by target keywords can improve consistency and reduce costs by skipping irrelevant companies.
     </p>
     <form method="post" action="/ui/classify/claude">
       <div class="filter-grid" style="margin-bottom:0.6rem;">
@@ -605,5 +607,4 @@
   </div>
 </details>
 
-</div>{# /max-width wrapper #}
 {% endblock %}
