@@ -12,6 +12,7 @@ from urllib.parse import quote_plus, urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -362,6 +363,9 @@ def ui_map(
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
     min_claude_score: str | None = Query(None),
+    min_combined_score: str | None = Query(None),
+    keywords: str | None = Query(None),
+    hide_cancelled: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     return templates.TemplateResponse(
@@ -375,6 +379,9 @@ def ui_map(
             "f_min_google_score": min_google_score or "",
             "f_min_zefix_score": min_zefix_score or "",
             "f_min_claude_score": min_claude_score or "",
+            "f_min_combined_score": min_combined_score or "",
+            "f_keywords": keywords or "",
+            "f_hide_cancelled": hide_cancelled == "true",
         },
     )
 
@@ -398,6 +405,9 @@ def api_map_data(
     min_google_score: int | None = Query(None),
     min_zefix_score: int | None = Query(None),
     min_claude_score: int | None = Query(None),
+    min_combined_score: int | None = Query(None),
+    keywords: str | None = Query(None),
+    hide_cancelled: bool = Query(False),
     min_lat: float | None = Query(None),
     max_lat: float | None = Query(None),
     min_lon: float | None = Query(None),
@@ -418,6 +428,7 @@ def api_map_data(
         CompanyModel.municipality,
         CompanyModel.website_url,
         CompanyModel.review_status,
+        CompanyModel.status,
     ).filter(
         CompanyModel.lat.isnot(None),
         CompanyModel.lon.isnot(None),
@@ -437,6 +448,30 @@ def api_map_data(
         query = query.filter(CompanyModel.zefix_score >= min_zefix_score)
     if min_claude_score is not None:
         query = query.filter(CompanyModel.claude_score >= min_claude_score)
+    if min_combined_score is not None:
+        _combined_expr = (
+            func.coalesce(CompanyModel.claude_score * 0.70, 0.0)
+            + func.coalesce(CompanyModel.website_match_score * 0.20, 0.0)
+            + func.coalesce(CompanyModel.zefix_score * 0.10, 0.0)
+        )
+        query = query.filter(_combined_expr >= min_combined_score)
+    if keywords:
+        kw_terms = [t.strip() for t in keywords.split(",") if t.strip()]
+        if kw_terms:
+            from sqlalchemy import or_
+            query = query.filter(or_(*(
+                or_(
+                    CompanyModel.purpose_keywords.ilike(f"%{kw}%"),
+                    CompanyModel.tfidf_cluster.ilike(f"%{kw}%"),
+                )
+                for kw in kw_terms
+            )))
+    if hide_cancelled:
+        _cancelled_terms = ["being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"]
+        from sqlalchemy import or_
+        query = query.filter(~or_(*(
+            CompanyModel.status.ilike(f"%{t}%") for t in _cancelled_terms
+        )))
     if None not in (min_lat, max_lat):
         query = query.filter(CompanyModel.lat >= min_lat, CompanyModel.lat <= max_lat)
     if None not in (min_lon, max_lon):
@@ -461,6 +496,7 @@ def api_map_data(
             "municipality": r.municipality,
             "website": r.website_url,
             "review": r.review_status,
+            "status": r.status,
         }
         for r in rows
     ]

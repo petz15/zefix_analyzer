@@ -55,7 +55,9 @@ _DIRECTORY_DOMAINS = {
     "region-emmental.ch",
     "bloomberg.com",
     "yandex.ru",
-    
+    "autolina.ch",
+    "autoscout24.ch",
+    "comparis.ch",
 }
 
 _NEWS_DOMAINS = {

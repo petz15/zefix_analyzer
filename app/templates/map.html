@@ -77,6 +77,24 @@
                  min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
         </label>
 
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Min Combined score</span>
+          <input type="number" name="min_combined_score" value="{{ f_min_combined_score }}"
+                 min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
+        </label>
+
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Keywords</span>
+          <input type="text" name="keywords" value="{{ f_keywords }}"
+                 placeholder="e.g. gastro, software" style="padding:0.3rem 0.5rem;">
+          <small style="color:var(--muted); font-size:0.78rem;">Searches purpose keywords &amp; clusters</small>
+        </label>
+
+        <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.83rem; cursor:pointer;">
+          <input type="checkbox" name="hide_cancelled" value="true" {% if f_hide_cancelled %}checked{% endif %}>
+          Hide cancelled / dissolved
+        </label>
+
         <button type="submit" style="margin-top:0.2rem;">Apply</button>
         <button type="button" id="btn-clear" class="secondary">Clear</button>
       </form>
@@ -118,6 +136,17 @@ var clusters = null;
 var loadSeq = 0;
 var loadTimer = null;
 
+// Group features by exact lat/lon to detect true co-located companies
+function groupByLocation(features) {
+  var groups = {};
+  features.forEach(function(f) {
+    var key = f.lat.toFixed(6) + ',' + f.lon.toFixed(6);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(f);
+  });
+  return groups;
+}
+
 function combinedScore(f) {
   // Same weights as Company.combined_score property: claude 70%, google 20%, zefix 10%
   var weights = [[f.claude_score, 0.70], [f.google_score, 0.20], [f.zefix_score, 0.10]];
@@ -134,37 +163,47 @@ function scoreColor(s) {
   return '#dc2626';
 }
 
-function makeMarker(f) {
+function companyPopupRow(f) {
+  var combined = combinedScore(f);
+  var html = '<div style="margin-bottom:0.4rem; padding-bottom:0.4rem; border-bottom:1px solid #e5e7eb;">';
+  html += '<b><a href="' + companyBaseUrl + f.id + '" target="_blank">' + f.name + '</a></b>';
+  html += '<br><span style="color:#6b7280;font-size:0.82em;">' + (f.municipality || '') + (f.canton ? ', ' + f.canton : '') + '</span>';
+  if (combined !== null) {
+    html += '<br><span style="font-size:0.82em;">Combined: <b>' + combined + '</b>';
+    if (f.claude_score !== null && f.claude_score !== undefined) html += '&nbsp;·&nbsp;Claude: <b>' + f.claude_score + '</b>';
+    if (f.google_score !== null && f.google_score !== undefined) html += '&nbsp;·&nbsp;Google: <b>' + f.google_score + '</b>';
+    if (f.zefix_score !== null && f.zefix_score !== undefined)   html += '&nbsp;·&nbsp;Zefix: <b>'  + f.zefix_score  + '</b>';
+    html += '</span>';
+  }
+  if (f.website) html += '<br><a href="' + f.website + '" target="_blank" rel="noopener" style="font-size:0.82em;">' + f.website + '</a>';
+  if (f.review)  html += '<br><span style="font-size:0.8em;color:#6b7280;">Review: ' + f.review + '</span>';
+  html += '</div>';
+  return html;
+}
+
+function makeMarker(f, group) {
+  // group = array of all companies at this exact coordinate
   var combined = combinedScore(f);
   var color = scoreColor(combined);
+  var radius = group.length > 1 ? 9 : 7;
   var m = L.circleMarker([f.lat, f.lon], {
-    radius: 7,
+    radius: radius,
     fillColor: color,
     color: '#fff',
-    weight: 1.5,
+    weight: group.length > 1 ? 2 : 1.5,
     fillOpacity: 0.85,
   });
-  var popup = '<b><a href="' + companyBaseUrl + f.id + '" target="_blank">' + f.name + '</a></b>';
-  popup += '<br><span style="color:#6b7280;font-size:0.82em;">' + (f.municipality || '') + (f.canton ? ', ' + f.canton : '') + '</span>';
-  if (combined !== null) {
-    popup += '<br>Combined: <b>' + combined + '</b>';
+  var popup;
+  if (group.length === 1) {
+    popup = companyPopupRow(f);
+  } else {
+    // Multiple companies at the same address — show a scrollable list
+    popup = '<div style="font-weight:600;margin-bottom:0.4rem;">' + group.length + ' companies at this address</div>';
+    popup += '<div style="max-height:260px;overflow-y:auto;">';
+    group.forEach(function(g) { popup += companyPopupRow(g); });
+    popup += '</div>';
   }
-  if (f.claude_score !== null && f.claude_score !== undefined) {
-    popup += '&nbsp;·&nbsp;Claude: <b>' + f.claude_score + '</b>';
-  }
-  if (f.google_score !== null && f.google_score !== undefined) {
-    popup += '&nbsp;·&nbsp;Google: <b>' + f.google_score + '</b>';
-  }
-  if (f.zefix_score !== null && f.zefix_score !== undefined) {
-    popup += '&nbsp;·&nbsp;Zefix: <b>' + f.zefix_score + '</b>';
-  }
-  if (f.website) {
-    popup += '<br><a href="' + f.website + '" target="_blank" rel="noopener">' + f.website + '</a>';
-  }
-  if (f.review) {
-    popup += '<br>Review: ' + f.review;
-  }
-  m.bindPopup(popup);
+  m.bindPopup(popup, { maxWidth: 320 });
   return m;
 }
 
@@ -178,9 +217,20 @@ function loadData(params) {
     .then(function(data) {
       if (reqId !== loadSeq) return;
       if (clusters) { map.removeLayer(clusters); }
-      clusters = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 40 });
-      data.features.forEach(function(f) {
-        clusters.addLayer(makeMarker(f));
+      clusters = L.markerClusterGroup({
+        chunkedLoading: true,
+        maxClusterRadius: 40,
+        spiderfyOnMaxZoom: false,   // no spider spread — use popup list instead
+        zoomToBoundsOnClick: true,  // clicking a cluster zooms to fit it
+        disableClusteringAtZoom: 17,
+      });
+      var groups = groupByLocation(data.features);
+      Object.values(groups).forEach(function(group) {
+        // Use the highest combined score in the group for the marker color
+        var best = group.reduce(function(a, b) {
+          return (combinedScore(b) || 0) > (combinedScore(a) || 0) ? b : a;
+        });
+        clusters.addLayer(makeMarker(best, group));
       });
       map.addLayer(clusters);
       var suffix = '';
@@ -222,7 +272,10 @@ function scheduleLoad() {
 form.addEventListener('submit', function(e) {
   e.preventDefault();
   var p = {};
-  new FormData(form).forEach(function(v, k) { if (v) p[k] = v; });
+  new FormData(form).forEach(function(v, k) {
+    // include checkboxes only when checked (FormData omits unchecked boxes)
+    if (v) p[k] = v;
+  });
   // Update URL without reload
   history.replaceState(null, '', mapPageUrl + (Object.keys(p).length ? '?' + new URLSearchParams(p) : ''));
   scheduleLoad();
