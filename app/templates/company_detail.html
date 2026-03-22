@@ -22,10 +22,15 @@
       <span class="badge badge-gray">Not searched</span>
     {% endif %}
 
-    {% if company.website_match_score is not none %}
+    {% if company.combined_score is not none %}
+      {% set sc = company.combined_score %}
+      <span class="badge {% if sc >= 70 %}badge-green{% elif sc >= 40 %}badge-yellow{% else %}badge-red{% endif %}">
+        Combined {{ sc }}/100
+      </span>
+    {% elif company.website_match_score is not none %}
       {% set sc = company.website_match_score %}
       <span class="badge {% if sc >= 70 %}badge-green{% elif sc >= 40 %}badge-yellow{% else %}badge-red{% endif %}">
-        Score {{ sc }}/100
+        Google {{ sc }}/100
       </span>
     {% endif %}
 
@@ -178,14 +183,14 @@
 
   {% if google_results %}
     <p class="muted-hint">Select the best matching website and click "Use selected".</p>
-    <form method="post" action="/ui/companies/{{ company.id }}/set-website">
+    <form method="post" action="/ui/companies/{{ company.id }}/set-website" id="set-website-form">
+      <input type="hidden" name="website_match_score" id="selected-score" value="">
       <div class="results-list">
         {% for r in google_results %}
           <label class="result-card {% if company.website_url == r.link %}result-card--active{% endif %}">
-            <input type="radio" name="website_url" value="{{ r.link }}"
+            <input type="radio" name="website_url" value="{{ r.link }}" data-score="{{ r.score }}"
               {% if loop.first and not company.website_url %}checked{% endif %}
               {% if company.website_url == r.link %}checked{% endif %}>
-            <input type="hidden" name="website_match_score" value="{{ r.score }}">
             <div class="result-body">
               <div class="result-title">{{ r.title }}</div>
               <a class="result-url" href="{{ r.link }}" target="_blank" rel="noopener noreferrer">{{ r.link }}</a>
@@ -201,6 +206,19 @@
         <button type="submit">Use selected website</button>
       </div>
     </form>
+    <script>
+    (function() {
+      var form = document.getElementById('set-website-form');
+      if (!form) return;
+      var scoreInput = document.getElementById('selected-score');
+      function syncScore() {
+        var checked = form.querySelector('input[type="radio"][name="website_url"]:checked');
+        scoreInput.value = checked ? (checked.dataset.score || '') : '';
+      }
+      syncScore();
+      form.addEventListener('change', syncScore);
+    })();
+    </script>
   {% elif company.website_checked_at %}
     <p class="muted-hint">No results were returned for this company.</p>
   {% elif google_search_enabled %}

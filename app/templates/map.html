@@ -9,11 +9,12 @@
 <style>
   #map-wrap { display: flex; gap: 1rem; height: calc(100vh - 130px); }
   #map      { flex: 1; border-radius: 6px; border: 1px solid var(--line); }
-  #sidebar  { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+  #sidebar  { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.8rem; overflow-y: auto; }
   #map-info { font-size: 0.83rem; color: var(--muted); }
   .legend   { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; }
   .legend-row { display: flex; align-items: center; gap: 0.5rem; }
   .legend-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); flex-shrink:0; }
+  .legend-diamond { width: 11px; height: 11px; transform: rotate(45deg); border: 1px solid rgba(0,0,0,.2); flex-shrink:0; background:#6b7280; }
 </style>
 {% endblock %}
 
@@ -107,6 +108,7 @@
         <div class="legend-row"><div class="legend-dot" style="background:#ca8a04;"></div> 40–69</div>
         <div class="legend-row"><div class="legend-dot" style="background:#dc2626;"></div> &lt; 40</div>
         <div class="legend-row"><div class="legend-dot" style="background:#6b7280;"></div> Not scored</div>
+        <div class="legend-row" style="margin-top:0.4rem;"><div class="legend-diamond"></div> Multiple at address</div>
       </div>
       <p style="margin:0.5rem 0 0; font-size:0.78rem; color:var(--muted);">Claude 70% · Google 20% · Zefix 10%</p>
     </div>
@@ -185,14 +187,32 @@ function makeMarker(f, group) {
   // group = array of all companies at this exact coordinate
   var combined = combinedScore(f);
   var color = scoreColor(combined);
-  var radius = group.length > 1 ? 9 : 7;
-  var m = L.circleMarker([f.lat, f.lon], {
-    radius: radius,
-    fillColor: color,
-    color: '#fff',
-    weight: group.length > 1 ? 2 : 1.5,
-    fillOpacity: 0.85,
-  });
+  var m;
+  if (group.length > 1) {
+    var size = 22;
+    var icon = L.divIcon({
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      html: '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;">' +
+            '<div style="position:absolute;inset:0;background:' + color + ';' +
+            'transform:rotate(45deg);border:2px solid rgba(255,255,255,0.9);' +
+            'box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>' +
+            '<span style="position:absolute;inset:0;display:flex;align-items:center;' +
+            'justify-content:center;color:#fff;font-size:10px;font-weight:700;' +
+            'line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.5);">' +
+            group.length + '</span></div>',
+    });
+    m = L.marker([f.lat, f.lon], { icon: icon });
+  } else {
+    m = L.circleMarker([f.lat, f.lon], {
+      radius: 7,
+      fillColor: color,
+      color: '#fff',
+      weight: 1.5,
+      fillOpacity: 0.85,
+    });
+  }
   var popup;
   if (group.length === 1) {
     popup = companyPopupRow(f);

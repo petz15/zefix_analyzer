@@ -1,12 +1,65 @@
 {% extends "base.html" %}
 
+{% block extra_head %}
+<style>
+.settings-section {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 0.6rem;
+  background: var(--card-bg, #fff);
+}
+.settings-section > summary {
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  border-radius: 6px;
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary::after {
+  content: '▸';
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.settings-section[open] > summary {
+  border-bottom: 1px solid var(--line);
+  border-radius: 6px 6px 0 0;
+}
+.settings-section[open] > summary::after { content: '▾'; }
+.settings-body {
+  padding: 0.9rem 1rem 1rem;
+}
+.settings-body .form-grid {
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+.section-hint {
+  font-size: 0.83rem;
+  color: var(--muted);
+  margin: 0 0 0.7rem;
+}
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0 1rem;
+}
+</style>
 {% if active_task and ((scoring_task and not scoring_task.done) or (google_scoring_task and not google_scoring_task.done)) %}
-{% block extra_head %}<script>
+<script>
 (function(){setInterval(function(){if(!document.querySelector(':focus'))location.reload();},10000);})();
-</script>{% endblock %}
+</script>
 {% endif %}
+{% endblock %}
 
 {% block content %}
+
+{# ── Task status banners ───────────────────────────────────────────────────── #}
 {% if scoring_task and not scoring_task.done %}
 <section class="card" style="margin-bottom: 1rem;">
   <div style="display:flex; align-items:center; gap:0.8rem;">
@@ -45,12 +98,8 @@
     <p style="margin:0.35rem 0 0; color:var(--muted);">{{ google_scoring_task.message }}</p>
     <p style="margin:0.35rem 0 0; font-size:0.88rem; color:var(--muted);">
       Updated: {{ google_scoring_task.stats.get("updated", 0) }} companies
-      {% if google_scoring_task.stats.get("skipped") %}
-      &nbsp;·&nbsp; Skipped: {{ google_scoring_task.stats.get("skipped", 0) }}
-      {% endif %}
-      {% if google_scoring_task.stats.get("errors") %}
-      &nbsp;·&nbsp; Errors: {{ google_scoring_task.stats.errors | length }}
-      {% endif %}
+      {% if google_scoring_task.stats.get("skipped") %}&nbsp;·&nbsp; Skipped: {{ google_scoring_task.stats.get("skipped", 0) }}{% endif %}
+      {% if google_scoring_task.stats.get("errors") %}&nbsp;·&nbsp; Errors: {{ google_scoring_task.stats.errors | length }}{% endif %}
     </p>
   </section>
   {% endif %}
@@ -68,17 +117,13 @@
     <p style="margin:0.35rem 0 0; color:var(--muted);">{{ scoring_task.message }}</p>
     <p style="margin:0.35rem 0 0; font-size:0.88rem; color:var(--muted);">
       Updated: {{ scoring_task.stats.get("updated", 0) }} companies
-      {% if scoring_task.stats.get("errors") %}
-      &nbsp;·&nbsp; Errors: {{ scoring_task.stats.errors | length }}
-      {% endif %}
+      {% if scoring_task.stats.get("errors") %}&nbsp;·&nbsp; Errors: {{ scoring_task.stats.errors | length }}{% endif %}
     </p>
     {% if scoring_task.stats.get("errors") %}
       <details style="margin-top:0.55rem;">
         <summary style="cursor:pointer; color:var(--danger); font-size:0.88rem;">Show errors</summary>
         <ul style="margin:0.45rem 0 0; padding-left:1.2rem; font-size:0.84rem;">
-          {% for e in scoring_task.stats.errors %}
-          <li>{{ e }}</li>
-          {% endfor %}
+          {% for e in scoring_task.stats.errors %}<li>{{ e }}</li>{% endfor %}
         </ul>
       </details>
     {% endif %}
@@ -86,407 +131,479 @@
   {% endif %}
 {% endif %}
 
-<section class="card" style="max-width: 540px;">
-  <h2>Settings</h2>
+{# ── Page heading ─────────────────────────────────────────────────────────── #}
+<div style="max-width:780px;">
+<h2 style="margin:0 0 1rem;">Settings</h2>
 
-  <form method="post" action="/ui/settings" class="edit-form">
+{# ══════════════════════════════════════════════════════════════════════════ #}
+{# Main settings form — all fields POST together to /ui/settings              #}
+{# ══════════════════════════════════════════════════════════════════════════ #}
+<form method="post" action="/ui/settings">
 
-    <div class="form-grid" style="grid-template-columns: 1fr;">
+  {# ── Google Search ──────────────────────────────────────────────────────── #}
+  <details class="settings-section" open>
+    <summary>Google Search</summary>
+    <div class="settings-body">
+      <div class="form-grid">
+        <label class="form-label">
+          <span>Google Search</span>
+          <select name="google_search_enabled">
+            <option value="true"  {% if google_search_enabled %}selected{% endif %}>Enabled</option>
+            <option value="false" {% if not google_search_enabled %}selected{% endif %}>Disabled</option>
+          </select>
+          <small class="muted">When disabled, no Google Search API calls are made. Use Zefix data only.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Google Search</span>
-        <select name="google_search_enabled">
-          <option value="true"  {% if google_search_enabled %}selected{% endif %}>Enabled</option>
-          <option value="false" {% if not google_search_enabled %}selected{% endif %}>Disabled</option>
-        </select>
-        <small class="muted">When disabled, no Google Search API calls are made. Use Zefix data only.</small>
-      </label>
+        <label class="form-label">
+          <span>Daily Google quota</span>
+          <input type="number" name="google_daily_quota" value="{{ google_daily_quota }}" min="1" max="10000">
+          <small class="muted">Free tier = 100/day. Batch runs stop automatically when this limit is reached.</small>
+        </label>
+      </div>
+    </div>
+  </details>
 
-      <label class="form-label">
-        <span>Daily Google quota</span>
-        <input type="number" name="google_daily_quota" value="{{ google_daily_quota }}" min="1" max="10000">
-        <small class="muted">Free tier = 100/day. Batch runs stop automatically when this limit is reached.</small>
-      </label>
+  {# ── Zefix Scoring ──────────────────────────────────────────────────────── #}
+  <details class="settings-section">
+    <summary>Zefix Scoring</summary>
+    <div class="settings-body">
+      <p class="section-hint">Points added or subtracted during Zefix score calculation. After saving, use <em>Recalculate Scores</em> below to apply changes.</p>
+      <div class="form-grid">
+        <label class="form-label">
+          <span>Target clusters</span>
+          <input type="text" name="scoring_target_clusters" value="{{ scoring_target_clusters }}" placeholder="e.g. maschinenbau, software, holz">
+          <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match adds the cluster hit points.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Target clusters</span>
-        <input type="text" name="scoring_target_clusters" value="{{ scoring_target_clusters }}" placeholder="e.g. maschinenbau, software, holz">
-        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match adds the cluster hit points. Browse names in the Taxonomy panel.</small>
-      </label>
+        <label class="form-label">
+          <span>Cluster hit points</span>
+          <input type="number" name="scoring_cluster_hit_points" value="{{ scoring_cluster_hit_points }}" min="0" max="100" step="1">
+          <small class="muted">Points added per matching cluster. Default: 10.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Cluster hit points</span>
-        <input type="number" name="scoring_cluster_hit_points" value="{{ scoring_cluster_hit_points }}" min="0" max="100" step="1">
-        <small class="muted">Points added per matching cluster. Default: 10.</small>
-      </label>
+        <label class="form-label">
+          <span>Exclude clusters</span>
+          <input type="text" name="scoring_exclude_clusters" value="{{ scoring_exclude_clusters }}" placeholder="e.g. treuhand, holding, beratung">
+          <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match <strong>subtracts</strong> the cluster exclude points.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Exclude clusters</span>
-        <input type="text" name="scoring_exclude_clusters" value="{{ scoring_exclude_clusters }}" placeholder="e.g. treuhand, holding, beratung">
-        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match <strong>subtracts</strong> the cluster exclude points.</small>
-      </label>
+        <label class="form-label">
+          <span>Cluster exclude points</span>
+          <input type="number" name="scoring_cluster_exclude_points" value="{{ scoring_cluster_exclude_points }}" min="0" max="100" step="1">
+          <small class="muted">Points subtracted per matching exclusion cluster. Default: 10.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Cluster exclude points</span>
-        <input type="number" name="scoring_cluster_exclude_points" value="{{ scoring_cluster_exclude_points }}" min="0" max="100" step="1">
-        <small class="muted">Points subtracted per matching exclusion cluster. Default: 10.</small>
-      </label>
+        <label class="form-label">
+          <span>Target keywords</span>
+          <input type="text" name="scoring_target_keywords" value="{{ scoring_target_keywords }}" placeholder="e.g. software, maschinenbau, präzision">
+          <small class="muted">Comma-separated substrings matched against purpose keywords. Each match adds the keyword hit points.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Target keywords</span>
-        <input type="text" name="scoring_target_keywords" value="{{ scoring_target_keywords }}" placeholder="e.g. software, maschinenbau, präzision">
-        <small class="muted">Comma-separated substrings matched against purpose keywords. Each match adds the keyword hit points.</small>
-      </label>
+        <label class="form-label">
+          <span>Keyword hit points</span>
+          <input type="number" name="scoring_keyword_hit_points" value="{{ scoring_keyword_hit_points }}" min="0" max="100" step="1">
+          <small class="muted">Points added per matching keyword. Default: 10.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Keyword hit points</span>
-        <input type="number" name="scoring_keyword_hit_points" value="{{ scoring_keyword_hit_points }}" min="0" max="100" step="1">
-        <small class="muted">Points added per matching keyword. Default: 10.</small>
-      </label>
+        <label class="form-label">
+          <span>Exclude keywords</span>
+          <input type="text" name="scoring_exclude_keywords" value="{{ scoring_exclude_keywords }}" placeholder="e.g. treuhand, verwaltung, holding">
+          <small class="muted">Comma-separated substrings matched against purpose keywords. Each match <strong>subtracts</strong> the keyword exclude points.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Exclude keywords</span>
-        <input type="text" name="scoring_exclude_keywords" value="{{ scoring_exclude_keywords }}" placeholder="e.g. treuhand, verwaltung, holding">
-        <small class="muted">Comma-separated substrings matched against purpose keywords. Each match <strong>subtracts</strong> the keyword exclude points.</small>
-      </label>
+        <label class="form-label">
+          <span>Keyword exclude points</span>
+          <input type="number" name="scoring_keyword_exclude_points" value="{{ scoring_keyword_exclude_points }}" min="0" max="100" step="1">
+          <small class="muted">Points subtracted per matching exclusion keyword. Default: 10.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Keyword exclude points</span>
-        <input type="number" name="scoring_keyword_exclude_points" value="{{ scoring_keyword_exclude_points }}" min="0" max="100" step="1">
-        <small class="muted">Points subtracted per matching exclusion keyword. Default: 10.</small>
-      </label>
+        <label class="form-label">
+          <span>Legal form scores</span>
+          <input type="text" name="scoring_legal_form_scores" value="{{ scoring_legal_form_scores }}" placeholder="gmbh:20,ag:8,einzelfirma:15,…">
+          <small class="muted">Comma-separated <code>short_name:points</code> pairs (case-insensitive). Companies not in the list get the default points below.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Origin latitude</span>
-        <input type="number" name="scoring_origin_lat" value="{{ scoring_origin_lat }}" step="0.0001" placeholder="46.9266">
-        <small class="muted">Latitude of your location for distance scoring. Default: 46.9266 (Muri bei Bern).</small>
-      </label>
+        <label class="form-label">
+          <span>Legal form default (pts)</span>
+          <input type="number" name="scoring_legal_form_default" value="{{ scoring_legal_form_default }}" min="-50" max="50" step="1">
+          <small class="muted">Points for legal forms not in the list above. Default: 5.</small>
+        </label>
 
-      <label class="form-label">
-        <span>Score: Origin longitude</span>
-        <input type="number" name="scoring_origin_lon" value="{{ scoring_origin_lon }}" step="0.0001" placeholder="7.4817">
-        <small class="muted">Longitude of your location. Default: 7.4817.</small>
-      </label>
+        <label class="form-label">
+          <span>Cancelled company score</span>
+          <input type="number" name="scoring_cancelled_score" value="{{ scoring_cancelled_score }}" min="0" max="20" step="1">
+          <small class="muted">Fixed score for companies with status being_cancelled/dissolved (bypasses normalisation). Default: 5.</small>
+        </label>
+      </div>
+    </div>
+  </details>
 
-      <label class="form-label">
-        <span>Score: Distance pts (≤15 km / ≤40 km / ≤80 km / ≤130 km / far)</span>
-        <div style="display:flex; gap:0.4rem;">
-          <input type="number" name="scoring_dist_15km"  value="{{ scoring_dist_15km }}"  style="width:5rem;" placeholder="20">
-          <input type="number" name="scoring_dist_40km"  value="{{ scoring_dist_40km }}"  style="width:5rem;" placeholder="10">
-          <input type="number" name="scoring_dist_80km"  value="{{ scoring_dist_80km }}"  style="width:5rem;" placeholder="5">
-          <input type="number" name="scoring_dist_130km" value="{{ scoring_dist_130km }}" style="width:5rem;" placeholder="0">
-          <input type="number" name="scoring_dist_far"   value="{{ scoring_dist_far }}"   style="width:5rem;" placeholder="-5">
+  {# ── Default Location ───────────────────────────────────────────────────── #}
+  <details class="settings-section">
+    <summary>Default Location &amp; Distance Scoring</summary>
+    <div class="settings-body">
+      <p class="section-hint">Companies closer to the origin score higher. Adjust tiers to match your territory.</p>
+      <div class="form-grid">
+        <label class="form-label">
+          <span>Origin latitude</span>
+          <input type="number" name="scoring_origin_lat" value="{{ scoring_origin_lat }}" step="0.0001" placeholder="46.9266">
+          <small class="muted">Latitude of your location for distance scoring. Default: 46.9266 (Muri bei Bern).</small>
+        </label>
+
+        <label class="form-label">
+          <span>Origin longitude</span>
+          <input type="number" name="scoring_origin_lon" value="{{ scoring_origin_lon }}" step="0.0001" placeholder="7.4817">
+          <small class="muted">Longitude of your location. Default: 7.4817.</small>
+        </label>
+
+        <label class="form-label">
+          <span>Distance pts (≤15 km / ≤40 km / ≤80 km / ≤130 km / far)</span>
+          <div style="display:flex; gap:0.4rem;">
+            <input type="number" name="scoring_dist_15km"  value="{{ scoring_dist_15km }}"  style="width:5rem;" placeholder="20">
+            <input type="number" name="scoring_dist_40km"  value="{{ scoring_dist_40km }}"  style="width:5rem;" placeholder="10">
+            <input type="number" name="scoring_dist_80km"  value="{{ scoring_dist_80km }}"  style="width:5rem;" placeholder="5">
+            <input type="number" name="scoring_dist_130km" value="{{ scoring_dist_130km }}" style="width:5rem;" placeholder="0">
+            <input type="number" name="scoring_dist_far"   value="{{ scoring_dist_far }}"   style="width:5rem;" placeholder="-5">
+          </div>
+          <small class="muted">Points awarded per distance tier. Negative values allowed for far-away companies.</small>
+        </label>
+      </div>
+    </div>
+  </details>
+
+  {# ── Claude Scoring ─────────────────────────────────────────────────────── #}
+  <details class="settings-section">
+    <summary>Claude Scoring</summary>
+    <div class="settings-body">
+      <p class="section-hint">Settings used when running Claude classification. Requires a valid Anthropic API key.</p>
+      <div class="form-grid">
+        <label class="form-label">
+          <span>Anthropic API key</span>
+          <input type="password" name="anthropic_api_key" value="{{ anthropic_api_key }}" placeholder="sk-ant-…" autocomplete="off">
+          <small class="muted">Required for Claude classification jobs. Also readable from the <code>ANTHROPIC_API_KEY</code> environment variable.</small>
+        </label>
+
+        <label class="form-label">
+          <span>Claude scoring target</span>
+          <textarea name="claude_target_description" rows="3" style="width:100%;"
+                    placeholder="e.g. We sell ERP software to Swiss manufacturing SMEs with 10–200 employees.">{{ claude_target_description }}</textarea>
+          <small class="muted">Describe what you are looking for. Claude appends this to the scoring prompt to calibrate scores toward your specific target.</small>
+        </label>
+
+        <label class="form-label">
+          <span>Max purpose chars</span>
+          <input type="number" name="scoring_claude_max_purpose_chars" value="{{ scoring_claude_max_purpose_chars }}" min="0" max="10000" step="100">
+          <small class="muted">Truncate purpose text to this many characters before sending to Claude. 0 = no limit. Default: 800.</small>
+        </label>
+      </div>
+
+      <details style="margin-top:0.8rem;">
+        <summary class="section-toggle">Classification prompt (optional)</summary>
+        <div style="margin-top:0.7rem;">
+          <p class="muted-hint">System prompt sent to Claude Haiku for each company. Leave empty to use the built-in default.
+            The model must output <strong>only</strong> a JSON object with <code>"score"</code> (0-100) and <code>"category"</code>.
+            Each company is sent as: <code>Company / Purpose / Industry / Keywords / Clusters</code>.</p>
+          <textarea name="claude_classify_prompt" rows="7" style="width:100%; font-family:monospace; font-size:0.85rem;"
+                    placeholder="You are evaluating Swiss company entries as B2B leads…">{{ claude_classify_prompt }}</textarea>
         </div>
-        <small class="muted">Points awarded per distance tier. Negative values allowed for far-away companies.</small>
-      </label>
+      </details>
 
-      <label class="form-label">
-        <span>Score: Legal form scores</span>
-        <input type="text" name="scoring_legal_form_scores" value="{{ scoring_legal_form_scores }}" placeholder="gmbh:20,ag:8,einzelfirma:15,…">
-        <small class="muted">Comma-separated <code>short_name:points</code> pairs (case-insensitive). Companies not in the list get the default points below.</small>
-      </label>
-
-      <label class="form-label">
-        <span>Score: Legal form default (pts)</span>
-        <input type="number" name="scoring_legal_form_default" value="{{ scoring_legal_form_default }}" min="-50" max="50" step="1">
-        <small class="muted">Points for legal forms not in the list above. Default: 5.</small>
-      </label>
-
-      <label class="form-label">
-        <span>Score: Cancelled company score</span>
-        <input type="number" name="scoring_cancelled_score" value="{{ scoring_cancelled_score }}" min="0" max="20" step="1">
-        <small class="muted">Fixed score for companies with status being_cancelled/dissolved (bypasses normalisation). Default: 5.</small>
-      </label>
-
-      <label class="form-label">
-        <span>Claude: Max purpose chars</span>
-        <input type="number" name="scoring_claude_max_purpose_chars" value="{{ scoring_claude_max_purpose_chars }}" min="0" max="10000" step="100">
-        <small class="muted">Truncate purpose text to this many characters before sending to Claude. 0 = no limit. Default: 800.</small>
-      </label>
-
-      <label class="form-label">
-        <span>Anthropic API key</span>
-        <input type="password" name="anthropic_api_key" value="{{ anthropic_api_key }}" placeholder="sk-ant-…" autocomplete="off">
-        <small class="muted">Required for Claude classification jobs. Also readable from the <code>ANTHROPIC_API_KEY</code> environment variable.</small>
-      </label>
-
-      <label class="form-label">
-        <span>Claude scoring target</span>
-        <textarea name="claude_target_description" rows="3" style="width:100%;"
-                  placeholder="e.g. We sell ERP software to Swiss manufacturing SMEs with 10–200 employees. Ideal leads are companies producing physical goods and likely to need production planning or inventory software.">{{ claude_target_description }}</textarea>
-        <small class="muted">Describe what you are looking for. Claude appends this to the scoring prompt so it calibrates scores toward your specific target.</small>
-      </label>
-
+      <details style="margin-top:0.6rem;">
+        <summary class="section-toggle">Category taxonomy (optional — injected when "Use fixed categories" is checked)</summary>
+        <div style="margin-top:0.7rem;">
+          <p class="muted-hint">One category per line. Injected into the prompt as an allowed list when "Use fixed categories" is checked during a classify run. Leave empty for free-form output.</p>
+          <textarea name="claude_classify_categories" rows="20" style="width:100%; font-family:monospace; font-size:0.82rem;"
+                    placeholder="Gastronomy&#10;Software Development&#10;…">{{ claude_classify_categories }}</textarea>
+        </div>
+      </details>
     </div>
+  </details>
 
-    <details style="margin-bottom: 0.8rem;">
-      <summary class="section-toggle">Claude classification prompt (optional)</summary>
-      <div style="margin-top: 0.7rem;">
-        <p class="muted-hint">System prompt sent to Claude Haiku for each company. Leave empty to use the built-in default.
-          The model must output <strong>only</strong> a JSON object with <code>"score"</code> (0-100) and <code>"category"</code>.
-          Each company is sent as: <code>Company / Purpose / Industry / Keywords / Clusters</code>.</p>
-        <textarea name="claude_classify_prompt" rows="7" style="width:100%; font-family: monospace; font-size: 0.85rem;"
-                  placeholder="You are evaluating Swiss company entries as B2B leads…">{{ claude_classify_prompt }}</textarea>
-      </div>
-    </details>
-
-    <details style="margin-bottom: 0.8rem;">
-      <summary class="section-toggle">Claude category taxonomy (optional — injected when "Use fixed categories" is checked)</summary>
-      <div style="margin-top: 0.7rem;">
-        <p class="muted-hint">One category per line. Injected into the prompt as an allowed list when "Use fixed categories" is checked during a classify run. Leave empty to use a free-form category output.</p>
-        <textarea name="claude_classify_categories" rows="20" style="width:100%; font-family: monospace; font-size: 0.82rem;"
-                  placeholder="Gastronomy&#10;Software Development&#10;…">{{ claude_classify_categories }}</textarea>
-      </div>
-    </details>
-
+  <div class="save-bar">
     <button type="submit">Save settings</button>
-    <a class="button-link secondary" href="/ui" style="margin-left: 0.5rem;">Cancel</a>
-  </form>
+    <a class="button-link secondary" href="/ui">Cancel</a>
+  </div>
 
-  <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
+</form>
 
-  <form method="post" action="/ui/scoring/recalculate">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Recompute all saved <code>zefix_score</code> values after you change the scoring settings.
-    </p>
-    <button type="submit">Recalculate scores</button>
-  </form>
+{# ══════════════════════════════════════════════════════════════════════════ #}
+{# Action sections — separate forms, outside the settings form               #}
+{# ══════════════════════════════════════════════════════════════════════════ #}
 
-  <form method="post" action="/ui/scoring/recalculate-google" style="margin-top:0.6rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Recompute all saved Google <code>website_match_score</code> values from stored search results.
-    </p>
-    <button type="submit">Recalculate Google scores</button>
-  </form>
-
-  <form method="post" action="/ui/scoring/re-geocode" style="margin-top:0.6rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Re-geocode all company addresses using the swisstopo building register (street-level precision).
-      Run this after the building DB has been built or if map coordinates look inaccurate.
-    </p>
-    <button type="submit">Re-geocode all companies</button>
-  </form>
-
-  <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--line);">
-
-  <form method="post" action="/ui/classify/hdbscan" style="margin-top:1rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Cluster companies by purpose text using spaCy lemmatization + TF-IDF + TruncatedSVD + HDBSCAN.
-      Stores a comma-separated label (top-N terms) in <code>tfidf_cluster</code>.
-      Noise/outliers are set to <code>null</code>. Leave filters empty to process all companies.
-    </p>
-    <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Canton</span>
-        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
-      </label>
-      <label class="form-label"><span>Min Zefix score</span>
-        <input type="number" name="min_zefix_score" placeholder="0–100">
-      </label>
-      <label class="form-label"><span>Max Zefix score</span>
-        <input type="number" name="max_zefix_score" placeholder="0–100">
-      </label>
-      <label class="form-label"><span>Limit (companies)</span>
-        <input type="number" name="limit" placeholder="leave empty = all">
-      </label>
+{# ── Recalculate Scores ─────────────────────────────────────────────────── #}
+<details class="settings-section">
+  <summary>Recalculate Scores</summary>
+  <div class="settings-body" style="display:flex; flex-direction:column; gap:0.9rem;">
+    <div>
+      <p class="muted" style="margin:0 0 0.5rem;">Recompute all saved <code>zefix_score</code> values after changing scoring settings.</p>
+      <form method="post" action="/ui/scoring/recalculate">
+        <button type="submit">Recalculate Zefix scores</button>
+      </form>
     </div>
-    <details style="margin-bottom:0.6rem;">
-      <summary class="section-toggle">Advanced clustering parameters</summary>
-      <div class="filter-grid" style="margin-top:0.5rem;">
-        <label class="form-label"><span>Number of clusters (K)</span>
-          <input type="number" name="n_clusters" value="150" min="10" max="500">
-          <small class="muted">How many distinct segments K-Means will form. More = finer-grained clusters.</small>
-        </label>
-        <label class="form-label"><span>Max clusters per company</span>
-          <input type="number" name="max_clusters_per_company" value="7" min="1" max="15">
-          <small class="muted">A company is assigned to its top-N most similar clusters.</small>
-        </label>
-        <label class="form-label"><span>Min similarity threshold</span>
-          <input type="number" name="min_similarity" value="0.10" min="0.01" max="0.99" step="0.01">
-          <small class="muted">Cosine similarity cutoff. Clusters below this are skipped; if none qualify → "Undefined".</small>
-        </label>
-        <label class="form-label"><span>SVD components</span>
-          <input type="number" name="n_components" value="50" min="10" max="300">
-          <small class="muted">Dimensions after reduction. Lower = faster; higher = more detail.</small>
-        </label>
-        <label class="form-label"><span>Top terms per cluster label</span>
-          <input type="number" name="top_terms" value="5" min="1" max="20">
-          <small class="muted">Keywords in each cluster label.</small>
-        </label>
-        <label class="form-label"><span>Keywords per company</span>
-          <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
-          <small class="muted">Top TF-IDF keywords from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
-        </label>
-        <label class="form-label"><span>Cluster on keywords</span>
-          <input type="checkbox" name="use_keywords" value="1">
-          <small class="muted">Use pre-extracted <code>purpose_keywords</code> as input instead of raw purpose text. Skips lemmatization — produces cleaner, less boilerplate-heavy clusters. Requires a prior pipeline run to have populated <code>purpose_keywords</code>.</small>
-        </label>
-      </div>
-    </details>
-    <button type="submit">Run HDBSCAN clustering</button>
-  </form>
-
-  <form method="post" action="/ui/classify/cluster-analysis" style="margin-top:0.75rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Analyze which terms appear across many cluster labels — use this after clustering to find
-      new stopword candidates. Output saved to
-      <a href="/static/cluster_analysis.txt" target="_blank"><code>cluster_analysis.txt</code></a>.
-    </p>
-    <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Top N clusters to analyze</span>
-        <input type="number" name="top_n_clusters" value="20" min="5">
-      </label>
-      <label class="form-label"><span>Top N terms per cluster</span>
-        <input type="number" name="top_n_terms" value="10" min="3">
-      </label>
+    <hr style="border:0; border-top:1px solid var(--line); margin:0;">
+    <div>
+      <p class="muted" style="margin:0 0 0.5rem;">Recompute all saved Google <code>website_match_score</code> values from stored search results.</p>
+      <form method="post" action="/ui/scoring/recalculate-google">
+        <button type="submit">Recalculate Google scores</button>
+      </form>
     </div>
-    <button type="submit" class="secondary">Analyze cross-cluster terms</button>
-  </form>
-
-  <form method="post" action="/ui/classify/recompute-keywords" style="margin-top:0.75rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
-      Recompute <code>purpose_keywords</code> without re-clustering. Runs lemmatization + TF-IDF
-      only — <code>tfidf_cluster</code> is left unchanged. Use this after tuning stopwords or
-      bigram/score settings, or before a keyword-mode cluster run.
-    </p>
-    <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Keywords per company</span>
-        <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
-      </label>
-      <label class="form-label"><span>Canton</span>
-        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
-      </label>
-      <label class="form-label"><span>Limit (companies)</span>
-        <input type="number" name="limit" placeholder="leave empty = all">
-      </label>
+    <hr style="border:0; border-top:1px solid var(--line); margin:0;">
+    <div>
+      <p class="muted" style="margin:0 0 0.5rem;">Re-geocode all company addresses using the swisstopo building register (street-level precision).
+        Run this after the building DB has been built or if map coordinates look inaccurate.</p>
+      <form method="post" action="/ui/scoring/re-geocode">
+        <button type="submit">Re-geocode all companies</button>
+      </form>
     </div>
-    <button type="submit" class="secondary">Recompute purpose_keywords</button>
-  </form>
+  </div>
+</details>
 
-  <form method="post" action="/ui/classify/claude" style="margin-top:1rem;">
-    <p class="muted" style="margin: 0 0 0.6rem;">
+{# ── Claude Classification ──────────────────────────────────────────────── #}
+<details class="settings-section">
+  <summary>Claude Classification</summary>
+  <div class="settings-body">
+    <p class="muted" style="margin:0 0 0.75rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
-      <code>claude_category</code> per company. Requires an Anthropic API key (set above).
+      <code>claude_category</code> per company. Requires an Anthropic API key (set in Claude Scoring above).
       Per-request: ~$0.25 / 1k companies (1 company/msg). With 10 companies/msg + prompt caching: ~$0.03–0.05 / 1k. Batch API adds another ~50% discount.
     </p>
-    <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Canton</span>
-        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+    <form method="post" action="/ui/classify/claude">
+      <div class="filter-grid" style="margin-bottom:0.6rem;">
+        <label class="form-label"><span>Canton</span>
+          <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+        </label>
+        <label class="form-label"><span>Min Zefix score</span>
+          <input type="number" name="min_zefix_score" placeholder="0-100">
+        </label>
+        <label class="form-label"><span>Max Zefix score</span>
+          <input type="number" name="max_zefix_score" placeholder="0-100">
+        </label>
+        <label class="form-label"><span>Min Google score</span>
+          <input type="number" name="min_google_score" placeholder="0-100" min="0" max="100">
+          <small class="muted">Only classify companies whose Google score is at least this value.</small>
+        </label>
+        <label class="form-label"><span>Purpose keywords filter</span>
+          <input type="text" name="purpose_keywords" placeholder="e.g. gastro, software">
+          <small class="muted">Only classify companies whose purpose keywords contain this text.</small>
+        </label>
+        <label class="form-label"><span>Max companies</span>
+          <input type="number" name="limit" value="500">
+        </label>
+        <label class="form-label">
+          <span>Companies per message</span>
+          <input type="number" name="companies_per_message" value="10" min="1" max="50">
+          <small class="muted">Pack N companies into one API call. 10–20 recommended.</small>
+        </label>
+      </div>
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+        <input type="checkbox" name="rerun_classified" value="true">
+        <span>Rerun already classified <small class="muted">(include companies that already have a Claude score)</small></span>
       </label>
-      <label class="form-label"><span>Min Zefix score</span>
-        <input type="number" name="min_zefix_score" placeholder="0-100">
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+        <input type="checkbox" name="use_batch_api" value="true">
+        <span>Use Batch API <small class="muted">(~50% cheaper — submits all at once, polls until done)</small></span>
       </label>
-      <label class="form-label"><span>Max Zefix score</span>
-        <input type="number" name="max_zefix_score" placeholder="0-100">
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+        <input type="checkbox" name="auto_filter_keywords" value="true">
+        <span>Auto-filter by target keywords <small class="muted">(only classify companies whose purpose keywords contain any of the scoring target keywords)</small></span>
       </label>
-      <label class="form-label"><span>Min Google score</span>
-        <input type="number" name="min_google_score" placeholder="0-100" min="0" max="100">
-        <small class="muted">Only classify companies whose Google score is at least this value.</small>
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+        <input type="checkbox" name="use_fixed_categories" value="true">
+        <span>Use fixed category list <small class="muted">(inject the category taxonomy from settings into the prompt)</small></span>
       </label>
-      <label class="form-label"><span>Purpose keywords filter</span>
-        <input type="text" name="purpose_keywords" placeholder="e.g. gastro, software">
-        <small class="muted">Only classify companies whose purpose keywords contain this text.</small>
-      </label>
-      <label class="form-label"><span>Max companies</span>
-        <input type="number" name="limit" value="500">
-      </label>
-      <label class="form-label">
-        <span>Companies per message</span>
-        <input type="number" name="companies_per_message" value="10" min="1" max="50">
-        <small class="muted">Pack N companies into one API call (reduces prompt overhead). 10–20 recommended.</small>
-      </label>
+      <button type="submit">Run Claude classification</button>
+    </form>
+  </div>
+</details>
+
+{# ── TF-IDF Clustering ──────────────────────────────────────────────────── #}
+<details class="settings-section">
+  <summary>TF-IDF Clustering</summary>
+  <div class="settings-body" style="display:flex; flex-direction:column; gap:1rem;">
+
+    <div>
+      <p class="muted" style="margin:0 0 0.6rem;">
+        Cluster companies by purpose text using spaCy lemmatization + TF-IDF + TruncatedSVD + HDBSCAN.
+        Stores a comma-separated label (top-N terms) in <code>tfidf_cluster</code>.
+        Noise/outliers are set to <code>null</code>. Leave filters empty to process all companies.
+      </p>
+      <form method="post" action="/ui/classify/hdbscan">
+        <div class="filter-grid" style="margin-bottom:0.6rem;">
+          <label class="form-label"><span>Canton</span>
+            <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+          </label>
+          <label class="form-label"><span>Min Zefix score</span>
+            <input type="number" name="min_zefix_score" placeholder="0–100">
+          </label>
+          <label class="form-label"><span>Max Zefix score</span>
+            <input type="number" name="max_zefix_score" placeholder="0–100">
+          </label>
+          <label class="form-label"><span>Limit (companies)</span>
+            <input type="number" name="limit" placeholder="leave empty = all">
+          </label>
+        </div>
+        <details style="margin-bottom:0.6rem;">
+          <summary class="section-toggle">Advanced clustering parameters</summary>
+          <div class="filter-grid" style="margin-top:0.5rem;">
+            <label class="form-label"><span>Number of clusters (K)</span>
+              <input type="number" name="n_clusters" value="150" min="10" max="500">
+              <small class="muted">How many distinct segments K-Means will form. More = finer-grained clusters.</small>
+            </label>
+            <label class="form-label"><span>Max clusters per company</span>
+              <input type="number" name="max_clusters_per_company" value="7" min="1" max="15">
+              <small class="muted">A company is assigned to its top-N most similar clusters.</small>
+            </label>
+            <label class="form-label"><span>Min similarity threshold</span>
+              <input type="number" name="min_similarity" value="0.10" min="0.01" max="0.99" step="0.01">
+              <small class="muted">Cosine similarity cutoff. Clusters below this are skipped; if none qualify → "Undefined".</small>
+            </label>
+            <label class="form-label"><span>SVD components</span>
+              <input type="number" name="n_components" value="50" min="10" max="300">
+              <small class="muted">Dimensions after reduction. Lower = faster; higher = more detail.</small>
+            </label>
+            <label class="form-label"><span>Top terms per cluster label</span>
+              <input type="number" name="top_terms" value="5" min="1" max="20">
+              <small class="muted">Keywords in each cluster label.</small>
+            </label>
+            <label class="form-label"><span>Keywords per company</span>
+              <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
+              <small class="muted">Top TF-IDF keywords from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
+            </label>
+            <label class="form-label"><span>Cluster on keywords</span>
+              <input type="checkbox" name="use_keywords" value="1">
+              <small class="muted">Use pre-extracted <code>purpose_keywords</code> as input instead of raw purpose text. Skips lemmatization — produces cleaner clusters. Requires a prior pipeline run.</small>
+            </label>
+          </div>
+        </details>
+        <button type="submit">Run HDBSCAN clustering</button>
+      </form>
     </div>
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-      <input type="checkbox" name="rerun_classified" value="true">
-      <span>Rerun already classified <small class="muted">(include companies that already have a Claude score)</small></span>
-    </label>
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-      <input type="checkbox" name="use_batch_api" value="true">
-      <span>Use Batch API <small class="muted">(~50% cheaper — submits all at once, polls until done)</small></span>
-    </label>
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-      <input type="checkbox" name="auto_filter_keywords" value="true">
-      <span>Auto-filter by target keywords <small class="muted">(only classify companies whose purpose keywords contain any of the scoring target keywords)</small></span>
-    </label>
-    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
-      <input type="checkbox" name="use_fixed_categories" value="true">
-      <span>Use fixed category list <small class="muted">(inject the category taxonomy from settings into the prompt — more consistent output)</small></span>
-    </label>
-    <button type="submit">Run Claude classification</button>
-  </form>
-</section>
 
-<section class="card" style="margin-top:1.5rem;">
-  <h3 style="margin:0 0 0.4rem;">Purpose Boilerplate Patterns</h3>
-  <p class="muted" style="margin:0 0 0.8rem;">
-    Regex patterns applied to company purpose text <em>before</em> it is sent to Claude.
-    Sentences matching an active pattern are stripped, reducing input tokens for generic
-    Swiss registry filler clauses. Patterns are case-insensitive.
-    Use <code>scripts/analyze_boilerplate.py --insert</code> to discover candidates from
-    the actual data, or add patterns manually below.
-  </p>
+    <hr style="border:0; border-top:1px solid var(--line); margin:0;">
 
-  {% if boilerplate_patterns %}
-  <table style="width:100%; border-collapse:collapse; font-size:0.875rem; margin-bottom:1rem;">
-    <thead>
-      <tr style="border-bottom:1px solid var(--line);">
-        <th style="text-align:left; padding:0.35rem 0.5rem;">Pattern</th>
-        <th style="text-align:left; padding:0.35rem 0.5rem;">Description</th>
-        <th style="text-align:right; padding:0.35rem 0.5rem;">Matches</th>
-        <th style="text-align:center; padding:0.35rem 0.5rem;">Active</th>
-        <th style="padding:0.35rem 0.5rem;"></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for bp in boilerplate_patterns %}
-      <tr style="border-bottom:1px solid var(--line); {% if not bp.active %}opacity:0.45;{% endif %}">
-        <td style="padding:0.35rem 0.5rem; font-family:monospace; word-break:break-all; max-width:28rem;">
-          {{ bp.pattern }}
-          {% if bp.example %}
-          <div style="font-family:inherit; font-size:0.78rem; color:var(--muted); margin-top:0.15rem;">e.g. {{ bp.example[:120] }}{% if bp.example|length > 120 %}…{% endif %}</div>
-          {% endif %}
-        </td>
-        <td style="padding:0.35rem 0.5rem; color:var(--muted);">{{ bp.description or "—" }}</td>
-        <td style="padding:0.35rem 0.5rem; text-align:right; color:var(--muted);">{{ bp.match_count if bp.match_count is not none else "—" }}</td>
-        <td style="padding:0.35rem 0.5rem; text-align:center;">
-          <span class="badge-sm {% if bp.active %}badge-green{% else %}badge-gray{% endif %}">
-            {{ "on" if bp.active else "off" }}
-          </span>
-        </td>
-        <td style="padding:0.35rem 0.5rem; white-space:nowrap; text-align:right;">
-          <form method="post" action="/ui/boilerplate/{{ bp.id }}/toggle" style="display:inline;">
-            <button type="submit" class="secondary" style="padding:0.2rem 0.5rem; font-size:0.8rem;">
-              {{ "Disable" if bp.active else "Enable" }}
-            </button>
-          </form>
-          <form method="post" action="/ui/boilerplate/{{ bp.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this pattern?')">
-            <button type="submit" class="danger" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted" style="margin:0 0 0.8rem;">No patterns yet. Run the analysis script or add one manually.</p>
-  {% endif %}
-
-  <form method="post" action="/ui/boilerplate/add" style="margin-top:0.5rem;">
-    <p style="margin:0 0 0.5rem; font-weight:600; font-size:0.9rem;">Add pattern manually</p>
-    <div class="filter-grid" style="margin-bottom:0.5rem;">
-      <label class="form-label" style="grid-column:1/-1;">
-        <span>Regex pattern <small class="muted">(case-insensitive, matched against individual sentences)</small></span>
-        <input type="text" name="pattern" placeholder="\balle\s+Geschäfte\s+tätigen\b.*?\bgeeignet\s+sind\b" style="font-family:monospace;">
-      </label>
-      <label class="form-label">
-        <span>Description <small class="muted">(optional)</small></span>
-        <input type="text" name="description" placeholder="e.g. All suitable transactions clause">
-      </label>
-      <label class="form-label">
-        <span>Example sentence <small class="muted">(optional)</small></span>
-        <input type="text" name="example" placeholder="Die Gesellschaft kann alle Geschäfte tätigen…">
-      </label>
+    <div>
+      <p class="muted" style="margin:0 0 0.6rem;">
+        Analyze which terms appear across many cluster labels — use after clustering to find
+        new stopword candidates. Output saved to
+        <a href="/static/cluster_analysis.txt" target="_blank"><code>cluster_analysis.txt</code></a>.
+      </p>
+      <form method="post" action="/ui/classify/cluster-analysis">
+        <div class="filter-grid" style="margin-bottom:0.6rem;">
+          <label class="form-label"><span>Top N clusters to analyze</span>
+            <input type="number" name="top_n_clusters" value="20" min="5">
+          </label>
+          <label class="form-label"><span>Top N terms per cluster</span>
+            <input type="number" name="top_n_terms" value="10" min="3">
+          </label>
+        </div>
+        <button type="submit" class="secondary">Analyze cross-cluster terms</button>
+      </form>
     </div>
-    <button type="submit" class="secondary">Add pattern</button>
-  </form>
-</section>
+
+    <hr style="border:0; border-top:1px solid var(--line); margin:0;">
+
+    <div>
+      <p class="muted" style="margin:0 0 0.6rem;">
+        Recompute <code>purpose_keywords</code> without re-clustering. Runs lemmatization + TF-IDF
+        only — <code>tfidf_cluster</code> is left unchanged. Use after tuning stopwords or
+        before a keyword-mode cluster run.
+      </p>
+      <form method="post" action="/ui/classify/recompute-keywords">
+        <div class="filter-grid" style="margin-bottom:0.6rem;">
+          <label class="form-label"><span>Keywords per company</span>
+            <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
+          </label>
+          <label class="form-label"><span>Canton</span>
+            <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
+          </label>
+          <label class="form-label"><span>Limit (companies)</span>
+            <input type="number" name="limit" placeholder="leave empty = all">
+          </label>
+        </div>
+        <button type="submit" class="secondary">Recompute purpose_keywords</button>
+      </form>
+    </div>
+
+  </div>
+</details>
+
+{# ── Boilerplate Patterns ───────────────────────────────────────────────── #}
+<details class="settings-section">
+  <summary>Boilerplate Patterns</summary>
+  <div class="settings-body">
+    <p class="muted" style="margin:0 0 0.8rem;">
+      Regex patterns applied to company purpose text <em>before</em> it is sent to Claude.
+      Sentences matching an active pattern are stripped, reducing input tokens for generic
+      Swiss registry filler clauses. Patterns are case-insensitive.
+      Use <code>scripts/analyze_boilerplate.py --insert</code> to discover candidates from
+      the actual data, or add patterns manually below.
+    </p>
+
+    {% if boilerplate_patterns %}
+    <table style="width:100%; border-collapse:collapse; font-size:0.875rem; margin-bottom:1rem;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--line);">
+          <th style="text-align:left; padding:0.35rem 0.5rem;">Pattern</th>
+          <th style="text-align:left; padding:0.35rem 0.5rem;">Description</th>
+          <th style="text-align:right; padding:0.35rem 0.5rem;">Matches</th>
+          <th style="text-align:center; padding:0.35rem 0.5rem;">Active</th>
+          <th style="padding:0.35rem 0.5rem;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bp in boilerplate_patterns %}
+        <tr style="border-bottom:1px solid var(--line); {% if not bp.active %}opacity:0.45;{% endif %}">
+          <td style="padding:0.35rem 0.5rem; font-family:monospace; word-break:break-all; max-width:28rem;">
+            {{ bp.pattern }}
+            {% if bp.example %}
+            <div style="font-family:inherit; font-size:0.78rem; color:var(--muted); margin-top:0.15rem;">e.g. {{ bp.example[:120] }}{% if bp.example|length > 120 %}…{% endif %}</div>
+            {% endif %}
+          </td>
+          <td style="padding:0.35rem 0.5rem; color:var(--muted);">{{ bp.description or "—" }}</td>
+          <td style="padding:0.35rem 0.5rem; text-align:right; color:var(--muted);">{{ bp.match_count if bp.match_count is not none else "—" }}</td>
+          <td style="padding:0.35rem 0.5rem; text-align:center;">
+            <span class="badge-sm {% if bp.active %}badge-green{% else %}badge-gray{% endif %}">
+              {{ "on" if bp.active else "off" }}
+            </span>
+          </td>
+          <td style="padding:0.35rem 0.5rem; white-space:nowrap; text-align:right;">
+            <form method="post" action="/ui/boilerplate/{{ bp.id }}/toggle" style="display:inline;">
+              <button type="submit" class="secondary" style="padding:0.2rem 0.5rem; font-size:0.8rem;">
+                {{ "Disable" if bp.active else "Enable" }}
+              </button>
+            </form>
+            <form method="post" action="/ui/boilerplate/{{ bp.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this pattern?')">
+              <button type="submit" class="danger" style="padding:0.2rem 0.5rem; font-size:0.8rem;">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="margin:0 0 0.8rem;">No patterns yet. Run the analysis script or add one manually.</p>
+    {% endif %}
+
+    <form method="post" action="/ui/boilerplate/add" style="margin-top:0.5rem;">
+      <p style="margin:0 0 0.5rem; font-weight:600; font-size:0.9rem;">Add pattern manually</p>
+      <div class="filter-grid" style="margin-bottom:0.5rem;">
+        <label class="form-label" style="grid-column:1/-1;">
+          <span>Regex pattern <small class="muted">(case-insensitive, matched against individual sentences)</small></span>
+          <input type="text" name="pattern" placeholder="\balle\s+Geschäfte\s+tätigen\b.*?\bgeeignet\s+sind\b" style="font-family:monospace;">
+        </label>
+        <label class="form-label">
+          <span>Description <small class="muted">(optional)</small></span>
+          <input type="text" name="description" placeholder="e.g. All suitable transactions clause">
+        </label>
+        <label class="form-label">
+          <span>Example sentence <small class="muted">(optional)</small></span>
+          <input type="text" name="example" placeholder="Die Gesellschaft kann alle Geschäfte tätigen…">
+        </label>
+      </div>
+      <button type="submit" class="secondary">Add pattern</button>
+    </form>
+  </div>
+</details>
+
+</div>{# /max-width wrapper #}
 {% endblock %}
